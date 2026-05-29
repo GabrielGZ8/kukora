@@ -2,19 +2,14 @@
  * exchangeService.js — kukora arbitrage
  * Binance  WS: wss://stream.binance.com  (bookTicker + depth5)
  * Kraken   WS: wss://ws.kraken.com       (ticker + book)
- * Bybit    WS: wss://stream.bybit.com    (tickers + orderbook.1)
+ * Bybit    WS: wss://stream.bybit.com    (tickers + orderbook.50)
  * OKX      WS: wss://ws.okx.com          (books5 + tickers)
- * Coinbase   : HTTPS public ticker (fallback, auth-free endpoint)
+ * Coinbase   : HTTPS public buy+sell endpoints (auth-free, real bid/ask)
  *
- * IMPROVEMENTS:
- *  - OKX added as 4th exchange with WS + L2 depth for real slippage
- *  - Kraken L2 depth via WS for real slippage
- *  - Bybit  L2 depth via WS for real slippage
- *  - calcRealSlippage now works for ALL exchanges (no fallback needed unless depth missing)
- *  - slippageUSD fixed: +(Math.abs(avgPrice - topPrice) * amount).toFixed(6)
- *  - Coinbase uses public REST v2 endpoint (no auth required)
- *  - Parallel HTTP fetches with AbortSignal.timeout(3000)
- *  - wsStatus includes OKX
+ * FIXES:
+ *  - Coinbase: dual fetch /buy + /sell for real bid/ask spread (no auth required)
+ *  - Bybit: orderbook.50 (was orderbook.1) for meaningful depth
+ *  - Bybit: snapshot + delta merge implemented (same pattern as Kraken)
  */
 
 const { TRADING_FEES: FEES } = require('./feeConfig');
@@ -30,7 +25,7 @@ const _state = {
 
 const MAX_RETRIES = 12;
 const STALE_WS_MS = 2500;
-const CACHE_TTL   = 1000; // reduced from 1500ms for fresher data
+const CACHE_TTL   = 1000;
 let _cache = null, _cacheTs = 0;
 
 // ─── WS factory ───────────────────────────────────────────────────────────
@@ -78,7 +73,7 @@ function calcVwapSlippage(levels, amount) {
   const avgPrice    = totalCost / amount;
   const topPrice    = levels[0][0];
   const slippagePct = Math.abs((avgPrice - topPrice) / topPrice) * 100;
-  const slippageUSD = +(Math.abs(avgPrice - topPrice) * amount).toFixed(6); // FIX: parenthesis + toFixed
+  const slippageUSD = +(Math.abs(avgPrice - topPrice) * amount).toFixed(6);
 
   return {
     avgPrice,
@@ -138,7 +133,6 @@ function connectKraken() {
     _state.Kraken.wsReady = true;
     _state.Kraken.retries = 0;
     console.log('◈ Kraken WS connected');
-    // Subscribe to both ticker AND book (depth 10) for real slippage
     ws.send(JSON.stringify({ event: 'subscribe', pair: ['XBT/USD'], subscription: { name: 'ticker' } }));
     ws.send(JSON.stringify({ event: 'subscribe', pair: ['XBT/USD'], subscription: { name: 'book', depth: 10 } }));
   });
@@ -156,7 +150,6 @@ function connectKraken() {
       }
       if (channelName === 'book-10') {
         const bookData = msg[1];
-        // Snapshot: { as: [...], bs: [...] } or update: { a: [...], b: [...] }
         if (bookData.as || bookData.bs) {
           // Full snapshot
           _state.Kraken.depth = {
@@ -168,7 +161,7 @@ function connectKraken() {
           // Delta update — merge into existing depth
           if (_state.Kraken.depth) {
             if (bookData.a) {
-              for (const [p,q,t] of bookData.a) {
+              for (const [p,q] of bookData.a) {
                 const price = parseFloat(p), qty = parseFloat(q);
                 const idx = _state.Kraken.depth.asks.findIndex(([ap]) => ap === price);
                 if (qty === 0) { if (idx >= 0) _state.Kraken.depth.asks.splice(idx, 1); }
@@ -177,7 +170,7 @@ function connectKraken() {
               }
             }
             if (bookData.b) {
-              for (const [p,q,t] of bookData.b) {
+              for (const [p,q] of bookData.b) {
                 const price = parseFloat(p), qty = parseFloat(q);
                 const idx = _state.Kraken.depth.bids.findIndex(([bp]) => bp === price);
                 if (qty === 0) { if (idx >= 0) _state.Kraken.depth.bids.splice(idx, 1); }
@@ -200,6 +193,7 @@ function connectKraken() {
 }
 
 // ─── Bybit WS ─────────────────────────────────────────────────────────────
+// FIX: orderbook.50 for meaningful depth; snapshot + delta merge like Kraken
 function connectBybit() {
   const WS = getWSClass();
   const ws = makeWS(WS, 'wss://stream.bybit.com/v5/public/spot');
@@ -210,7 +204,8 @@ function connectBybit() {
     _state.Bybit.wsReady = true;
     _state.Bybit.retries = 0;
     console.log('◈ Bybit WS connected');
-    ws.send(JSON.stringify({ op: 'subscribe', args: ['tickers.BTCUSDT', 'orderbook.1.BTCUSDT'] }));
+    // FIX: subscribe to orderbook.50 instead of orderbook.1
+    ws.send(JSON.stringify({ op: 'subscribe', args: ['tickers.BTCUSDT', 'orderbook.50.BTCUSDT'] }));
     ping = setInterval(() => ws.readyState === WS.OPEN && ws.send(JSON.stringify({ op: 'ping' })), 20000);
   });
   ws.on('message', raw => {
@@ -224,15 +219,37 @@ function connectBybit() {
         _state.Bybit.data = { exchange: 'Bybit', bid, ask, spread: ask-bid, spreadPct: +((ask-bid)/ask*100).toFixed(4), ts: new Date().toISOString(), latencyMs, source: 'ws' };
         _cacheTs = 0;
       }
-      // orderbook.1 gives best bid/ask with qty — sufficient for slippage calc at 0.1 BTC
-      if (msg.topic === 'orderbook.1.BTCUSDT' && msg.data) {
+      // FIX: orderbook.50 sends snapshot (type='snapshot') and deltas (type='delta')
+      if (msg.topic === 'orderbook.50.BTCUSDT' && msg.data) {
         const d = msg.data;
-        if (d.b && d.a) {
+        if (msg.type === 'snapshot') {
+          // Full snapshot — initialize state
           _state.Bybit.depth = {
-            bids: d.b.map(([p,q]) => [parseFloat(p), parseFloat(q)]),
-            asks: d.a.map(([p,q]) => [parseFloat(p), parseFloat(q)]),
+            bids: (d.b || []).map(([p,q]) => [parseFloat(p), parseFloat(q)]).sort((a,b) => b[0]-a[0]),
+            asks: (d.a || []).map(([p,q]) => [parseFloat(p), parseFloat(q)]).sort((a,b) => a[0]-b[0]),
             ts: Date.now(),
           };
+        } else if (msg.type === 'delta' && _state.Bybit.depth) {
+          // Delta update — merge by price level (qty=0 means remove)
+          if (d.b) {
+            for (const [p,q] of d.b) {
+              const price = parseFloat(p), qty = parseFloat(q);
+              const idx = _state.Bybit.depth.bids.findIndex(([bp]) => bp === price);
+              if (qty === 0) { if (idx >= 0) _state.Bybit.depth.bids.splice(idx, 1); }
+              else if (idx >= 0) { _state.Bybit.depth.bids[idx] = [price, qty]; }
+              else { _state.Bybit.depth.bids.push([price, qty]); _state.Bybit.depth.bids.sort((a,b) => b[0]-a[0]); }
+            }
+          }
+          if (d.a) {
+            for (const [p,q] of d.a) {
+              const price = parseFloat(p), qty = parseFloat(q);
+              const idx = _state.Bybit.depth.asks.findIndex(([ap]) => ap === price);
+              if (qty === 0) { if (idx >= 0) _state.Bybit.depth.asks.splice(idx, 1); }
+              else if (idx >= 0) { _state.Bybit.depth.asks[idx] = [price, qty]; }
+              else { _state.Bybit.depth.asks.push([price, qty]); _state.Bybit.depth.asks.sort((a,b) => a[0]-b[0]); }
+            }
+          }
+          _state.Bybit.depth.ts = Date.now();
         }
       }
     } catch {}
@@ -257,7 +274,6 @@ function connectOKX() {
     _state.OKX.wsReady = true;
     _state.OKX.retries = 0;
     console.log('◈ OKX WS connected');
-    // Subscribe to tickers (best bid/ask) and books5 (L2 depth, 5 levels)
     ws.send(JSON.stringify({
       op: 'subscribe',
       args: [
@@ -265,15 +281,14 @@ function connectOKX() {
         { channel: 'books5',   instId: 'BTC-USDT' },
       ],
     }));
-    // OKX requires ping every 30s
     ping = setInterval(() => ws.readyState === WS.OPEN && ws.send('ping'), 25000);
   });
   ws.on('message', raw => {
     const text = raw.toString();
-    if (text === 'pong') return; // heartbeat response
+    if (text === 'pong') return;
     try {
       const msg = JSON.parse(text);
-      if (msg.event) return; // subscribe/error acks
+      if (msg.event) return;
 
       const channel = msg.arg?.channel;
 
@@ -281,7 +296,6 @@ function connectOKX() {
         const d = msg.data[0];
         const bid = parseFloat(d.bidPx), ask = parseFloat(d.askPx);
         if (!bid || !ask) return;
-        // OKX provides ts in ms since epoch
         const latencyMs = d.ts ? Math.max(0, Date.now() - parseInt(d.ts)) : 0;
         _state.OKX.data = { exchange: 'OKX', bid, ask, spread: ask-bid, spreadPct: +((ask-bid)/ask*100).toFixed(4), ts: new Date().toISOString(), latencyMs, source: 'ws' };
         _cacheTs = 0;
@@ -313,13 +327,6 @@ connectBybit();
 connectOKX();
 
 // ─── Slippage calculator (all exchanges) ──────────────────────────────────
-/**
- * calcRealSlippage — compute VWAP slippage from live order book depth.
- * Falls back to null if no depth available for that exchange.
- * @param {number} amount - BTC amount
- * @param {'buy'|'sell'} side
- * @param {string} exchange - exchange name (defaults to Binance for backward compat)
- */
 function calcRealSlippage(amount, side = 'buy', exchange = 'Binance') {
   const depth = _state[exchange]?.depth;
   if (!depth) return { avgPrice: null, slippagePct: null, slippageUSD: null, method: 'none' };
@@ -367,19 +374,39 @@ const PARSERS = {
     if (!bid || !ask) throw new Error('no bid/ask');
     return { exchange: ex, bid, ask, spread: ask-bid, spreadPct: +((ask-bid)/ask*100).toFixed(4), ts: new Date().toISOString(), latencyMs: ms, source: 'http-fallback' };
   },
-  // Coinbase: use public v2 API (no auth required, no geo-blocking issues)
-  Coinbase: (json, ex, ms) => {
-    // v2/prices endpoint returns { data: { base, currency, amount } } — not useful for spread
-    // use spot price as mid — bid/ask not available without auth
-    // We mark this as limited and skip if no proper spread available
-    const bid = parseFloat(json.best_bid ?? json.data?.amount);
-    const ask = parseFloat(json.best_ask ?? json.data?.amount);
-    if (!bid || !ask || bid <= 0 || ask <= 0 || bid === ask) {
-      return { exchange: ex, error: 'No bid/ask spread', bid: null, ask: null, spread: null, spreadPct: null, ts: new Date().toISOString(), latencyMs: ms, source: 'http' };
-    }
-    return { exchange: ex, bid, ask, spread: ask-bid, spreadPct: +((ask-bid)/ask*100).toFixed(4), ts: new Date().toISOString(), latencyMs: ms, source: 'http' };
-  },
 };
+
+// ─── Coinbase HTTP fallback: dual fetch buy+sell for real bid/ask ──────────
+// FIX: /spot returns only amount (mid price, no spread).
+// Use /buy (ask) + /sell (bid) — both are public, no auth required.
+async function fetchCoinbase() {
+  const t0 = Date.now();
+  try {
+    const [buyRes, sellRes] = await Promise.all([
+      fetch('https://api.coinbase.com/v2/prices/BTC-USD/buy',  { signal: AbortSignal.timeout(3000) }),
+      fetch('https://api.coinbase.com/v2/prices/BTC-USD/sell', { signal: AbortSignal.timeout(3000) }),
+    ]);
+    if (!buyRes.ok)  throw new Error(`buy HTTP ${buyRes.status}`);
+    if (!sellRes.ok) throw new Error(`sell HTTP ${sellRes.status}`);
+    const [buyJson, sellJson] = await Promise.all([buyRes.json(), sellRes.json()]);
+    const ask = parseFloat(buyJson.data?.amount);   // buy price = what you pay = ask
+    const bid = parseFloat(sellJson.data?.amount);  // sell price = what you receive = bid
+    if (!ask || !bid || ask <= 0 || bid <= 0) {
+      return { exchange: 'Coinbase', error: 'Invalid price data', bid: null, ask: null, spread: null, spreadPct: null, ts: new Date().toISOString(), latencyMs: Date.now() - t0, source: 'http' };
+    }
+    return {
+      exchange: 'Coinbase',
+      bid, ask,
+      spread: ask - bid,
+      spreadPct: +((ask - bid) / ask * 100).toFixed(4),
+      ts: new Date().toISOString(),
+      latencyMs: Date.now() - t0,
+      source: 'http',
+    };
+  } catch (e) {
+    return { exchange: 'Coinbase', error: e.message, bid: null, ask: null, spread: null, spreadPct: null, ts: new Date().toISOString(), latencyMs: Date.now() - t0, source: 'http' };
+  }
+}
 
 // ─── HTTP URLs ────────────────────────────────────────────────────────────
 const HTTP_URLS = {
@@ -387,8 +414,6 @@ const HTTP_URLS = {
   Kraken:   'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
   Bybit:    'https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT',
   OKX:      'https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT',
-  // Coinbase: use production-safe public endpoint (no auth, no geo-block)
-  Coinbase: 'https://api.coinbase.com/v2/prices/BTC-USD/spot',
 };
 
 // ─── getOrderBooks ─────────────────────────────────────────────────────────
@@ -404,6 +429,8 @@ async function getOrderBooks() {
     if (st && st.wsReady && st.data && now - new Date(st.data.ts).getTime() < STALE_WS_MS) {
       return Promise.resolve(st.data);
     }
+    // Coinbase uses its own dual-fetch function; others use generic fetchWithLatency
+    if (ex === 'Coinbase') return fetchCoinbase();
     return fetchWithLatency(HTTP_URLS[ex], ex, PARSERS[ex]);
   }));
 

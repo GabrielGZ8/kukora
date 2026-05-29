@@ -13,6 +13,7 @@
  *  - Avg execution time
  *  - Streak de wins/losses consecutivos
  *  - OKX soporte en wallets y balances
+ *  - FIX: unrealizedPnl calculado desde btcPrice actual cuando se provee
  */
 
 const mongoose = require('mongoose');
@@ -74,8 +75,6 @@ function getBalances() {
 
 /**
  * Compute withdrawal/rebalancing fee for moving assets between exchanges.
- * In a real arb: after buying BTC on buyExchange, you'd withdraw it to sellExchange.
- * This is a simplified one-way withdrawal cost at current BTC price.
  */
 function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
   const buyFee  = WITHDRAWAL_FEES[buyExchange]  || { BTC: 0.0003, USDT: 6 };
@@ -95,8 +94,6 @@ function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
  * IMPORTANT: trade.netProfit ALREADY includes withdrawalFeeUSD deducted by
  * detectOpportunities() in arbitrageEngine.js. Do NOT subtract it again here.
  * We only record it for reporting/breakdown purposes.
- *
- * Returns { ok: true, trade } on success, { ok: false, reason } on failure.
  */
 async function applyTrade(trade) {
   const { buyExchange, sellExchange, amount, buyPrice, sellPrice, buyFee, sellFee } = trade;
@@ -104,7 +101,6 @@ async function applyTrade(trade) {
   const usdtCost  = buyPrice * amount + (buyFee || 0);
   const btcNeeded = amount;
 
-  // ── Pre-flight balance checks ─────────────────────────────────────────
   const usdtAvailable = wallets.USDT[buyExchange];
   const btcAvailable  = wallets.BTC[sellExchange];
 
@@ -129,11 +125,9 @@ async function applyTrade(trade) {
     return { ok: false, reason };
   }
 
-  // ── Compute withdrawal fee for record-keeping (already in trade.netProfit) ─
   const wf = calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice);
   const withdrawalFeeUSD = wf.totalUSD;
 
-  // ── Apply balance changes ─────────────────────────────────────────────
   const usdtGain = sellPrice * amount - (sellFee || 0);
 
   wallets.USDT[buyExchange]  -= usdtCost;
@@ -141,7 +135,6 @@ async function applyTrade(trade) {
   wallets.BTC[sellExchange]  -= amount;
   wallets.USDT[sellExchange] += usdtGain;
 
-  // Sanity guard — should never trigger after pre-flight checks above
   for (const ex of EXCHANGES) {
     if ((wallets.USDT[ex] !== undefined && wallets.USDT[ex] < -0.01) ||
         (wallets.BTC[ex]  !== undefined && wallets.BTC[ex]  < -0.000001)) {
@@ -154,8 +147,6 @@ async function applyTrade(trade) {
     }
   }
 
-  // ── FIX: netProfit already has withdrawalFeeUSD deducted by the engine ──
-  // DO NOT subtract withdrawalFeeUSD again. Only record it for breakdown.
   const finalNetProfit = +(trade.netProfit || 0).toFixed(4);
   const finalNetProfitPct = +((finalNetProfit / (buyPrice * amount)) * 100).toFixed(4);
 
@@ -163,7 +154,7 @@ async function applyTrade(trade) {
     ...trade,
     netProfit:        finalNetProfit,
     netProfitPct:     finalNetProfitPct,
-    withdrawalFees:   withdrawalFeeUSD,    // for display/breakdown only
+    withdrawalFees:   withdrawalFeeUSD,
     withdrawalDetail: wf,
     status:           finalNetProfit > 0 ? 'profit' : 'loss',
     balancesAfter:    getBalances(),
@@ -209,7 +200,14 @@ function getTradeHistory() {
   return [...tradeHistory];
 }
 
-function getPnL() {
+/**
+ * getPnL — returns realized and unrealized P&L.
+ *
+ * @param {number|null} currentBtcPrice — optional current BTC ask price.
+ *   If provided, unrealizedPnl = (totalCurrentBtc - totalInitialBtc) * currentBtcPrice.
+ *   If omitted, unrealizedPnl = 0.
+ */
+function getPnL(currentBtcPrice = null) {
   if (!tradeHistory.length) {
     return {
       totalPnl: 0, realizedPnl: 0, unrealizedPnl: 0,
@@ -224,11 +222,18 @@ function getPnL() {
 
   const wins    = tradeHistory.filter(t => (t.netProfit || 0) > 0);
   const losses  = tradeHistory.filter(t => (t.netProfit || 0) <= 0);
-  const totalPnl = tradeHistory.reduce((s, t) => s + (t.netProfit || 0), 0);
+  const realizedPnl = tradeHistory.reduce((s, t) => s + (t.netProfit || 0), 0);
   const winRate  = (wins.length / tradeHistory.length) * 100;
 
-  const realizedPnl   = totalPnl;
-  const unrealizedPnl = 0;
+  // FIX: unrealizedPnl reflects change in BTC value vs initial allocation
+  let unrealizedPnl = 0;
+  if (currentBtcPrice != null && currentBtcPrice > 0) {
+    const totalCurrentBtc = EXCHANGES.reduce((s, ex) => s + (wallets.BTC[ex] || 0), 0);
+    const totalInitialBtc = EXCHANGES.reduce((s, ex) => s + (INITIAL_BALANCES.BTC[ex] || 0), 0);
+    unrealizedPnl = (totalCurrentBtc - totalInitialBtc) * currentBtcPrice;
+  }
+
+  const totalPnl = realizedPnl + unrealizedPnl;
 
   let peak = 0, cum = 0, maxDrawdown = 0;
   for (const t of tradeHistory) {
@@ -253,7 +258,6 @@ function getPnL() {
   const totalFees         = tradeHistory.reduce((s, t) => s + (t.totalFees || (t.buyFee||0) + (t.sellFee||0)), 0);
   const totalWithdrawalFees = tradeHistory.reduce((s, t) => s + (t.withdrawalFees || 0), 0);
 
-  // Slippage method breakdown (real vs fallback)
   const slippageMethodBreakdown = { real: 0, fallback: 0 };
   tradeHistory.forEach(t => {
     if (t.slippageMethod === 'real') slippageMethodBreakdown.real++;

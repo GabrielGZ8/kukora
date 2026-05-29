@@ -189,6 +189,22 @@ export default function ArbitragePage() {
   const totalSlip = (slipBreakdown.real || 0) + (slipBreakdown.fallback || 0);
   const realSlipPct = totalSlip > 0 ? Math.round((slipBreakdown.real / totalSlip) * 100) : null;
 
+  // ── Capital Efficiency ─────────────────────────────────────────────────
+  // bestAskPrice: use lowest valid ask across all order books
+  const bestAskPrice = validBooks.length
+    ? validBooks.reduce((best, ob) => (!best || ob.ask < best) ? ob.ask : best, null)
+    : null;
+  // Capital desplegado: sum of BTC*price + USDT across all exchanges
+  const capitalDeployed = (() => {
+    if (!wallets.BTC || !wallets.USDT || !bestAskPrice) return null;
+    const btcVal  = Object.values(wallets.BTC  || {}).reduce((s, v) => s + (v || 0), 0) * bestAskPrice;
+    const usdtVal = Object.values(wallets.USDT || {}).reduce((s, v) => s + (v || 0), 0);
+    return btcVal + usdtVal;
+  })();
+  const roi = capitalDeployed > 0 ? ((pnl.totalPnl || 0) / capitalDeployed) * 100 : null;
+  const unrealizedPnl = pnl.unrealizedPnl ?? 0;
+  const unrealizedColor = unrealizedPnl >= 0 ? 'var(--color-green)' : 'var(--color-red)';
+
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16, padding:'0 2px' }}>
 
@@ -222,6 +238,32 @@ export default function ArbitragePage() {
             <span style={{ fontSize:16, fontWeight:800, color:color||'var(--text)', fontFamily:'var(--font-mono)', lineHeight:1 }}>{value}</span>
           </div>
         ))}
+
+        <div style={{ width:1, height:32, background:'var(--border)' }} />
+
+        {/* ── Capital Efficiency Panel ── */}
+        {capitalDeployed != null && (
+          <>
+            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Capital</span>
+              <span style={{ fontSize:14, fontWeight:800, color:'var(--text)', fontFamily:'var(--font-mono)', lineHeight:1 }}>${fmt(capitalDeployed,0)}</span>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>ROI</span>
+              <span style={{ fontSize:14, fontWeight:800, color:roi >= 0 ? 'var(--color-green)' : 'var(--color-red)', fontFamily:'var(--font-mono)', lineHeight:1 }}>
+                {roi != null ? `${roi >= 0 ? '+' : ''}${roi.toFixed(4)}%` : '—'}
+              </span>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Unrealized</span>
+              <span style={{ fontSize:14, fontWeight:800, color:unrealizedColor, fontFamily:'var(--font-mono)', lineHeight:1 }}>
+                {unrealizedPnl >= 0 ? '+' : ''}{fmtP(unrealizedPnl, 4)}
+              </span>
+            </div>
+          </>
+        )}
+
+        <div style={{ width:1, height:32, background:'var(--border)' }} />
 
         <div style={{ display:'flex', flexDirection:'column', gap:4, minWidth:160 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>

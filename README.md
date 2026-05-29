@@ -1,7 +1,7 @@
 
 # kukora — Multi-Exchange Crypto Arbitrage Bot
 
-Real-time arbitrage detection across Binance, Kraken, Bybit and Coinbase.
+Real-time arbitrage detection across Binance, Kraken, Bybit, OKX and Coinbase.
 WebSocket connections, composite scoring, persistent equity curve.
 
 ---
@@ -19,14 +19,14 @@ WebSocket connections, composite scoring, persistent equity curve.
 │  Express Server (Node.js)                                   │
 │  ┌──────────────────┐  ┌───────────────────┐               │
 │  │ arbitrageEngine  │  │  exchangeService  │               │
-│  │ detectOps()      │  │  WebSocket × 3    │               │
+│  │ detectOps()      │  │  WebSocket × 4    │               │
 │  │ executeSimulated │  │  HTTP fallback    │               │
 │  │ triangularSignal │  │  order book depth │               │
 │  └──────────────────┘  └───────────────────┘               │
 │  ┌──────────────────┐  ┌───────────────────┐               │
 │  │  walletManager   │  │  scoringService   │               │
 │  │  equity curve    │  │  0-100 composite  │               │
-│  │  realized P&L    │  │  + fee efficiency │               │
+│  │  realized P&L    │  │  + slippage qual  │               │
 │  └──────────────────┘  └───────────────────┘               │
 └─────────────────────────────────────────────────────────────┘
                             │ optional
@@ -39,12 +39,13 @@ WebSocket connections, composite scoring, persistent equity curve.
 
 ## Exchange Connections
 
-| Exchange  | Method       | Latency         | Depth data |
-|-----------|--------------|-----------------|------------|
-| Binance   | WebSocket    | ~5–15ms real    | Yes (L2-5) |
-| Kraken    | WebSocket    | ~10–30ms real   | No         |
-| Bybit     | WebSocket    | ~5–20ms real    | No         |
-| Coinbase  | HTTP poll    | ~100–400ms      | No         |
+| Exchange  | Method       | Latency         | Depth data  |
+|-----------|--------------|-----------------|-------------|
+| Binance   | WebSocket    | ~5–15ms real    | Yes (L2-5)  |
+| Kraken    | WebSocket    | ~10–30ms real   | Yes (L2-10) |
+| Bybit     | WebSocket    | ~5–20ms real    | Yes (L2-50) |
+| OKX       | WebSocket    | ~5–20ms real    | Yes (L2-5)  |
+| Coinbase  | HTTP poll    | ~100–400ms      | No          |
 
 Latency shown in the UI is **real end-to-end** (exchange event timestamp → UI render), not a static value.
 
@@ -56,7 +57,7 @@ WS connections auto-reconnect with exponential backoff (max 12 retries, capped a
 
 Each tick (800ms) the engine:
 
-1. Reads live order books from all 4 exchanges
+1. Reads live order books from all 5 exchanges
 2. Computes all N×(N-1) directional pairs
 3. For each pair calculates:
 
@@ -65,10 +66,11 @@ grossProfit = (bidSell − askBuy) × amount
 buyFee      = askBuy × amount × fee_rate_buy
 sellFee     = bidSell × amount × fee_rate_sell
 slippageCost = realSlippage_buy + realSlippage_sell  (from L2 order book when available)
-netProfit   = grossProfit − buyFee − sellFee − slippageCost
+withdrawalFeeUSD = btcWithdrawal_USD + usdtWithdrawal_USD  (fixed per transaction)
+netProfit   = grossProfit − buyFee − sellFee − slippageCost − withdrawalFeeUSD
 ```
 
-4. Slippage is computed from Binance's live L2 order book (depth-5) using VWAP walk:
+4. Slippage is computed from live L2 order book depth (Binance, Kraken, Bybit, OKX) using VWAP walk:
 
 ```
 avgPrice = Σ(fill_i × price_i) / totalAmount
@@ -77,17 +79,17 @@ slippageUSD = |avgPrice − topPrice| × amount
 
 5. A **composite score (0–100)** is assigned to viable opportunities:
 
-| Factor         | Weight | Description                              |
-|----------------|--------|------------------------------------------|
-| Profitability  | 55%    | netProfitPct normalized (cap at 0.275%)  |
-| Speed          | 20%    | Penalizes +1pt per 50ms combined latency |
-| Liquidity      | 10%    | Lower slippage% = higher score           |
-| Confidence     | 10%    | Both WS=10, one WS=7, HTTP-only=5        |
-| Fee Efficiency |  5%    | Penalizes if fees > 40% of gross profit  |
+| Factor          | Weight | Description                                          |
+|-----------------|--------|------------------------------------------------------|
+| Profitability   | 50%    | netProfitPct/0.1 × 20, cap 50pts                    |
+| Speed           | 20%    | cap 20pts — penalizes 1pt per 50ms combined latency  |
+| Liquidity       | 15%    | cap 15pts — lower slippage% = higher score           |
+| Confidence      | 10%    | Both WS=10, one WS=7, HTTP-only=5                   |
+| Slippage Quality|  5%    | Real VWAP=5pts, fallback=0pts                        |
 
 6. Circuit breakers:
-   - Spread < 0.1% of ask price → blocked (too thin)
-   - Spread > 5% of ask price → blocked (likely stale/bad data)
+   - Spread < 0.08% of ask price → blocked (too thin)
+   - Spread > 3% of ask price → blocked (likely stale/bad data)
 
 ---
 
@@ -98,6 +100,7 @@ slippageUSD = |avgPrice − topPrice| × amount
 | Binance   | 0.10%       |
 | Kraken    | 0.26%       |
 | Bybit     | 0.10%       |
+| OKX       | 0.10%       |
 | Coinbase  | 0.60%       |
 
 ---
@@ -111,11 +114,11 @@ The engine also scans for 3-leg chains (A→B→C) and surfaces the best one as 
 ## Scoring Formula (complete)
 
 ```
-score = min(55, netProfitPct/0.1 × 20)       // profitability
-      + max(0, 20 − floor(totalLatencyMs/50)) // speed
-      + max(0, 10 − slippagePct/0.01 × 2)    // liquidity
-      + (bothWS=10, oneWS=7, HTTP=5)          // confidence
-      + feeEfficiency(0|1|3|5)               // fee ratio
+score = min(50, netProfitPct/0.1 × 20)         // profitability  (cap 50)
+      + max(0, 20 − floor(totalLatencyMs/50))   // speed          (cap 20)
+      + max(0, 15 − slippagePct/0.01 × 3)      // liquidity      (cap 15)
+      + (bothWS=10, oneWS=7, HTTP=5)            // confidence     (cap 10)
+      + (realVWAP=5, fallback=0)                // slippage qual  (cap  5)
 ```
 
 ---
@@ -168,5 +171,3 @@ src/
   hooks/useArbitrageStream.js — SSE client with reconnection
   components/layout/Layout.jsx — sidebar, topbar, market mood
 ```
-
-

@@ -9,6 +9,7 @@
  *  - OKX incluido en wallets display
  *  - Loop parallelizado: getOrderBooks + detectOpportunities sin await secuencial innecesario
  *  - Fingerprint TTL reducido a 10s para no bloquear trades válidos repetidos
+ *  - FIX: getPnL recibe el mejor ask disponible (Binance o primer ask válido) para unrealizedPnl
  */
 const express = require('express');
 const router  = express.Router();
@@ -23,11 +24,10 @@ let botStarted    = Date.now();
 let lastExecTs    = 0;
 let minScore      = 10;
 const recentFingerprints = new Map();
-const FINGERPRINT_TTL    = 10000; // 10s (was 15s — faster re-detection of real opportunities)
-const FINGERPRINT_MAX    = 500;   // cap map size regardless of cleanup interval
+const FINGERPRINT_TTL    = 10000;
+const FINGERPRINT_MAX    = 500;
 const MIN_EXEC_INTERVAL  = 800;
 
-// Cleanup expired fingerprints + cap size
 setInterval(() => {
   const now = Date.now();
   for (const [k, ts] of recentFingerprints) {
@@ -64,9 +64,19 @@ function appendEquityPoint(trade) {
     ts:     trade.ts,
     pnl:    cum,
     profit: +(trade.netProfit || 0).toFixed(4),
-    label:  `${trade.buyExchange[0]}→${trade.sellExchange[0]}`,
+    label:  `${trade.buyExchange[0]}→trade.sellExchange[0]}`,
   });
   if (_equityCurve.length > 500) _equityCurve = _equityCurve.slice(-500);
+}
+
+// ─── Helper: extract best ask price from order books for unrealizedPnl ─────
+function getBestAskPrice(orderBooks) {
+  const valid = (orderBooks || []).filter(ob => ob.ask && !ob.error);
+  if (!valid.length) return null;
+  // Prefer Binance (lowest latency), fallback to lowest ask among all
+  const binance = valid.find(ob => ob.exchange === 'Binance');
+  if (binance) return binance.ask;
+  return valid.reduce((best, ob) => (!best || ob.ask < best) ? ob.ask : best, null);
 }
 
 // ─── SSE Clients ───────────────────────────────────────────────────────────
@@ -89,7 +99,6 @@ async function arbitrageLoop() {
 
   const run = async () => {
     try {
-      // Parallel: fetch order books (IO-bound)
       const orderBooks = await getOrderBooks();
       const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
       let lastTrade = null;
@@ -102,12 +111,10 @@ async function arbitrageLoop() {
           if (!op.liquidityOk) return false;
           if (op.score < minScore) return false;
 
-          // Fingerprint deduplication
           const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(0)}-${op.sellPrice.toFixed(0)}-${op.spreadPct.toFixed(2)}`;
           const lastSeen = recentFingerprints.get(fp);
           if (lastSeen && Date.now() - lastSeen < FINGERPRINT_TTL) return false;
 
-          // Cap map size before adding
           if (recentFingerprints.size >= FINGERPRINT_MAX) {
             const oldestKey = recentFingerprints.keys().next().value;
             recentFingerprints.delete(oldestKey);
@@ -140,7 +147,8 @@ async function arbitrageLoop() {
 
       if (sseClients.size > 0 || alertsClients.size > 0) {
         _tickCount++;
-        // Optimized payload: send history every 5 ticks, equityCurve when changed or every 10
+        // FIX: pass best ask price to getPnL for unrealizedPnl calculation
+        const bestAskPrice = getBestAskPrice(orderBooks);
         const payload = {
           type:            'tick',
           botEnabled,
@@ -152,10 +160,8 @@ async function arbitrageLoop() {
           triangularSignal,
           lastTrade,
           wallets:         getBalances(),
-          pnl:             getPnL(),
-          // history every 5 ticks (~4s) to reduce payload size on hot path
+          pnl:             getPnL(bestAskPrice),
           ...(_tickCount % 5 === 0 && { history: getTradeHistory().slice(-20).reverse() }),
-          // equityCurve only when there's a new trade OR every 10 ticks
           ...(lastTrade || _tickCount % 10 === 0 ? { equityCurve: _equityCurve.slice(-100) } : {}),
           ts:              new Date().toISOString(),
         };
@@ -193,13 +199,14 @@ router.get('/stream', async (req, res) => {
   try {
     const orderBooks = await getOrderBooks();
     const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
+    const bestAskPrice = getBestAskPrice(orderBooks);
     res.write(`data: ${JSON.stringify({
       type: 'init', botEnabled, minScore,
       uptimeMs: Date.now() - botStarted,
       wsStatus: wsStatus(),
       orderBooks, opportunities, triangularSignal,
       wallets:     getBalances(),
-      pnl:         getPnL(),
+      pnl:         getPnL(bestAskPrice),
       history:     getTradeHistory().slice(-20).reverse(),
       equityCurve: _equityCurve.slice(-100),
       ts:          new Date().toISOString(),
@@ -226,6 +233,7 @@ router.get('/live', async (req, res) => {
     const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
     const history    = getTradeHistory();
     const lastTrade  = history.length ? history[history.length - 1] : null;
+    const bestAskPrice = getBestAskPrice(orderBooks);
 
     res.json({
       ok: true, botEnabled, minScore,
@@ -233,7 +241,7 @@ router.get('/live', async (req, res) => {
       wsStatus:    wsStatus(),
       orderBooks, opportunities, triangularSignal, lastTrade,
       wallets:     getBalances(),
-      pnl:         getPnL(),
+      pnl:         getPnL(bestAskPrice),
       history:     history.slice(-20).reverse(),
       equityCurve: _equityCurve.slice(-100),
     });
@@ -287,8 +295,10 @@ router.get('/wallets', (req, res) => {
 });
 
 // ─── GET /api/arbitrage/stats ──────────────────────────────────────────────
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
+    const orderBooks = await getOrderBooks().catch(() => []);
+    const bestAskPrice = getBestAskPrice(orderBooks);
     const history = getTradeHistory();
     const pairStats = {};
     history.forEach(t => {
@@ -298,7 +308,7 @@ router.get('/stats', (req, res) => {
       pairStats[key].totalPnl += t.netProfit || 0;
       if ((t.netProfit || 0) > 0) pairStats[key].wins++;
     });
-    res.json({ ok: true, data: { ...getPnL(), botEnabled, minScore, wsStatus: wsStatus(), uptimeMs: Date.now() - botStarted, pairStats, equityCurve: _equityCurve } });
+    res.json({ ok: true, data: { ...getPnL(bestAskPrice), botEnabled, minScore, wsStatus: wsStatus(), uptimeMs: Date.now() - botStarted, pairStats, equityCurve: _equityCurve } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

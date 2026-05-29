@@ -13,6 +13,8 @@
  *  - circuitBreaker: spread > 3% (was 5%) — tighter filter for stale data
  *  - Min viable threshold: netProfit must be > $0.50 (not just > 0) to avoid micro-noise trades
  *  - Triangular signal updated for 5 exchanges
+ *  - FIX: withdrawalFeeUSD is a fixed per-transaction fee — NOT scaled by ratio in executeSimulated
+ *  - FIX: netProfit in executeSimulated recalculated consistently
  */
 
 const { calcRealSlippage, getDepth }                    = require('./exchangeService');
@@ -41,12 +43,16 @@ function slippageStdDev() {
 }
 
 // ─── Score compuesto 0-100 ────────────────────────────────────────────────
-// Factores:
-//   profitability   (50%): netProfitPct normalizado
-//   speed           (20%): penaliza latencia alta
-//   liquidity       (15%): slippage bajo = mejor liquidez
-//   confidence      (10%): fuente WS > HTTP (más fresco)
-//   slippageQuality (5%):  real VWAP > fallback
+/**
+ * scoreOpportunity — composite score 0-100
+ *
+ * Factor weights:
+ *   profitability   (50%): cap 50pts — netProfitPct/0.1 × 20
+ *   speed           (20%): cap 20pts — penaliza 1pt por cada 50ms
+ *   liquidity       (15%): cap 15pts — slippage bajo = mejor
+ *   confidence      (10%): bothWS=10, anyWS=7, HTTP=5
+ *   slippageQuality  (5%): real VWAP=5, fallback=0
+ */
 function scoreOpportunity(op) {
   // Profitability: 0–50, cada 0.1% de ganancia neta = +20 pts (cap 50)
   const profScore = Math.min(50, (op.netProfitPct / 0.1) * 20);
@@ -97,14 +103,13 @@ function computeSlippage(exchange, side, price, tradeAmount) {
 // ─── Liquidity check: can the order book fill the requested amount? ────────
 function checkLiquidity(exchange, side, amount) {
   const depth = getDepth(exchange);
-  if (!depth) return { ok: true, reason: null, fillable: amount }; // no depth = assume ok (fallback)
+  if (!depth) return { ok: true, reason: null, fillable: amount };
 
   const levels = side === 'buy' ? depth.asks : depth.bids;
   if (!levels || !levels.length) return { ok: true, reason: null, fillable: amount };
 
   let totalQty = levels.reduce((s, [,q]) => s + q, 0);
   if (totalQty < amount * 0.5) {
-    // Book is too thin to fill even 50% of the order
     return {
       ok: false,
       reason: `Liquidity too low on ${exchange} ${side}: ${totalQty.toFixed(4)} BTC available`,
@@ -138,7 +143,6 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
 
       const slippageCost = buySlip.slippageUSD + sellSlip.slippageUSD;
       const slippagePct  = (buySlip.slippagePct + sellSlip.slippagePct) / 2;
-      // 'real' if BOTH legs have real VWAP data; 'partial' if one; 'fallback' if neither
       const slippageMethod = (buySlip.method === 'real' && sellSlip.method === 'real') ? 'real'
                            : (buySlip.method === 'real' || sellSlip.method === 'real') ? 'partial'
                            : 'fallback';
@@ -178,13 +182,10 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
 
       // Circuit breakers
       const cbSpreaTooSmall = spreadPct < MIN_SPREAD_PCT;
-      const cbSpreadTooLarge = spreadPct > MAX_SPREAD_PCT; // stale data guard
+      const cbSpreadTooLarge = spreadPct > MAX_SPREAD_PCT;
       const circuitBreaker = cbSpreaTooSmall || cbSpreadTooLarge;
 
-      // Liquidity failure blocks viability
       const liquidityOk = buyLiq.ok && sellLiq.ok;
-
-      // Minimum profit threshold ($0.50) prevents micro-noise trades
       const viableRaw = netProfit > MIN_NET_PROFIT;
       const viable = viableRaw && !circuitBreaker && liquidityOk;
 
@@ -199,7 +200,6 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
         } else if (cbSpreadTooLarge) {
           rejectionReason = `Spread bruto ${spreadPct.toFixed(2)}% > ${MAX_SPREAD_PCT}% (datos posiblemente obsoletos)`;
         } else if (netProfit <= MIN_NET_PROFIT) {
-          const totalCost = buyFee + sellFee + slippageCost + withdrawalFeeUSD;
           rejectionReason = `Net profit $${netProfit.toFixed(4)} < $${MIN_NET_PROFIT} mínimo | Fees $${(buyFee+sellFee).toFixed(2)} + slip $${slippageCost.toFixed(2)} + retiro $${withdrawalFeeUSD.toFixed(2)}`;
         }
       }
@@ -284,7 +284,7 @@ function detectTriangularSignal(books) {
 function executeSimulated(opportunity, wallets, amount = 0.1) {
   const t0 = Date.now();
   const { buyExchange, sellExchange, buyPrice, sellPrice,
-          netProfit, netProfitPct, grossProfit, buyFee, sellFee, slippage } = opportunity;
+          netProfitPct, grossProfit, buyFee, sellFee, slippage, withdrawalFeeUSD } = opportunity;
 
   if (opportunity.circuitBreaker || (sellPrice - buyPrice) < MIN_SPREAD_PCT * 0.01 * buyPrice) {
     return { ok: false, reason: `Circuit breaker: spread too small or invalid` };
@@ -311,6 +311,16 @@ function executeSimulated(opportunity, wallets, amount = 0.1) {
 
   const ratio = execAmount / amount;
 
+  // FIX: withdrawalFeeUSD is a fixed per-transaction fee — NOT scaled by ratio.
+  // netProfit recalculated consistently:
+  //   netProfit = (grossProfit - buyFee - sellFee - slippage) * ratio - withdrawalFeeUSD
+  const scaledGross   = +(grossProfit * ratio).toFixed(4);
+  const scaledBuyFee  = +(buyFee      * ratio).toFixed(4);
+  const scaledSellFee = +(sellFee     * ratio).toFixed(4);
+  const scaledSlip    = +(slippage    * ratio).toFixed(4);
+  const fixedWithdraw = opportunity.withdrawalFeeUSD; // NOT multiplied by ratio
+  const execNetProfit = +((grossProfit - buyFee - sellFee - slippage) * ratio - fixedWithdraw).toFixed(4);
+
   const trade = {
     id:              `trade-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     buyExchange,     sellExchange,
@@ -318,21 +328,21 @@ function executeSimulated(opportunity, wallets, amount = 0.1) {
     amount:          +execAmount.toFixed(6),
     requestedAmount: amount,
     partialFill:     execAmount < amount,
-    grossProfit:     +(grossProfit * ratio).toFixed(4),
-    buyFee:          +(buyFee     * ratio).toFixed(4),
-    sellFee:         +(sellFee    * ratio).toFixed(4),
-    totalFees:       +((buyFee + sellFee) * ratio).toFixed(4),
-    slippage:        +(slippage   * ratio).toFixed(4),
+    grossProfit:     scaledGross,
+    buyFee:          scaledBuyFee,
+    sellFee:         scaledSellFee,
+    totalFees:       +(scaledBuyFee + scaledSellFee).toFixed(4),
+    slippage:        scaledSlip,
     slippagePct:     opportunity.slippagePct,
     slippageMethod:  opportunity.slippageMethod,
-    withdrawalFeeUSD: +(opportunity.withdrawalFeeUSD * ratio).toFixed(4),
-    netProfit:       +(netProfit  * ratio).toFixed(4),
+    withdrawalFeeUSD: fixedWithdraw,
+    netProfit:       execNetProfit,
     netProfitPct:    +netProfitPct.toFixed(4),
     spreadPct:       opportunity.spreadPct,
     score:           opportunity.score || 0,
     buySource:       opportunity.buySource,
     sellSource:      opportunity.sellSource,
-    status:          (netProfit * ratio) > 0 ? 'profit' : 'loss',
+    status:          execNetProfit > 0 ? 'profit' : 'loss',
     executionMs:     Date.now() - t0,
     ts:              new Date().toISOString(),
   };

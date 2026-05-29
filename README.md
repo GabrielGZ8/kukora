@@ -1,3 +1,4 @@
+
 # kukora — Multi-Exchange Crypto Arbitrage Bot
 
 Real-time arbitrage detection across Binance, Kraken, Bybit and Coinbase.
@@ -167,3 +168,5 @@ src/
   hooks/useArbitrageStream.js — SSE client with reconnection
   components/layout/Layout.jsx — sidebar, topbar, market mood
 ```
+
+

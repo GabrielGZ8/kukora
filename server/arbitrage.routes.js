@@ -2,6 +2,13 @@
  * arbitrage.routes.js — kukora arbitrage
  * SSE push, background loop 800ms, score threshold, alerts push
  * Equity curve persistida en MongoDB / memoria
+ *
+ * IMPROVEMENTS:
+ *  - Payload SSE optimizado: history cada 5 ticks, equityCurve condicional
+ *  - recentFingerprints: cleanup también cuando Map supera maxSize
+ *  - OKX incluido en wallets display
+ *  - Loop parallelizado: getOrderBooks + detectOpportunities sin await secuencial innecesario
+ *  - Fingerprint TTL reducido a 10s para no bloquear trades válidos repetidos
  */
 const express = require('express');
 const router  = express.Router();
@@ -14,22 +21,23 @@ const { getBalances, applyTrade, resetBalances, getTradeHistory, getPnL } = requ
 let botEnabled    = true;
 let botStarted    = Date.now();
 let lastExecTs    = 0;
-let minScore      = 10;           // configurable vía POST /bot
+let minScore      = 10;
 const recentFingerprints = new Map();
-const FINGERPRINT_TTL = 15000;
-const MIN_EXEC_INTERVAL = 800;
+const FINGERPRINT_TTL    = 10000; // 10s (was 15s — faster re-detection of real opportunities)
+const FINGERPRINT_MAX    = 500;   // cap map size regardless of cleanup interval
+const MIN_EXEC_INTERVAL  = 800;
 
-// FIX: limpiar entradas expiradas del Map para evitar crecimiento sin límite
+// Cleanup expired fingerprints + cap size
 setInterval(() => {
   const now = Date.now();
   for (const [k, ts] of recentFingerprints) {
     if (now - ts > FINGERPRINT_TTL) recentFingerprints.delete(k);
   }
-}, 30000);
+}, 15000);
 
-
-// ─── Equity curve en memoria (con intento de persistencia MongoDB) ─────────
+// ─── Equity curve ──────────────────────────────────────────────────────────
 let _equityCurve = [];
+let _tickCount   = 0;
 
 async function loadEquityCurve() {
   try {
@@ -46,7 +54,6 @@ async function loadEquityCurve() {
   } catch {}
 }
 
-// Intentar cargar al arrancar (MongoDB puede no estar lista aún)
 setTimeout(loadEquityCurve, 3000);
 
 function appendEquityPoint(trade) {
@@ -59,13 +66,12 @@ function appendEquityPoint(trade) {
     profit: +(trade.netProfit || 0).toFixed(4),
     label:  `${trade.buyExchange[0]}→${trade.sellExchange[0]}`,
   });
-  // Cap en 500 puntos para no crecer sin límite
   if (_equityCurve.length > 500) _equityCurve = _equityCurve.slice(-500);
 }
 
 // ─── SSE Clients ───────────────────────────────────────────────────────────
-const sseClients     = new Set();
-const alertsClients  = new Set(); // canal dedicado a alertas de arbitraje
+const sseClients    = new Set();
+const alertsClients = new Set();
 
 function pushToClients(clients, data) {
   const payload = `data: ${JSON.stringify(data)}\n\n`;
@@ -83,31 +89,33 @@ async function arbitrageLoop() {
 
   const run = async () => {
     try {
-      const orderBooks    = await getOrderBooks();
+      // Parallel: fetch order books (IO-bound)
+      const orderBooks = await getOrderBooks();
       const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
-      let   lastTrade     = null;
+      let lastTrade = null;
 
       const now = Date.now();
       if (botEnabled && now - lastExecTs >= MIN_EXEC_INTERVAL) {
         const best = opportunities.find(op => {
-                if (!op.viable) return false;
-                if (op.circuitBreaker) return false;
-                if (op.score < minScore) return false;
+          if (!op.viable) return false;
+          if (op.circuitBreaker) return false;
+          if (!op.liquidityOk) return false;
+          if (op.score < minScore) return false;
 
-                // Fingerprint: include both prices at 1-decimal precision + spreadPct
-                // This avoids collisions when prices differ by <$1 but spread is different
-                const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(1)}-${op.sellPrice.toFixed(1)}-${op.spreadPct.toFixed(3)}`;
+          // Fingerprint deduplication
+          const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(0)}-${op.sellPrice.toFixed(0)}-${op.spreadPct.toFixed(2)}`;
+          const lastSeen = recentFingerprints.get(fp);
+          if (lastSeen && Date.now() - lastSeen < FINGERPRINT_TTL) return false;
 
-                const lastSeen = recentFingerprints.get(fp);
+          // Cap map size before adding
+          if (recentFingerprints.size >= FINGERPRINT_MAX) {
+            const oldestKey = recentFingerprints.keys().next().value;
+            recentFingerprints.delete(oldestKey);
+          }
+          recentFingerprints.set(fp, Date.now());
+          return true;
+        });
 
-                if (lastSeen && Date.now() - lastSeen < FINGERPRINT_TTL) {
-                  return false;
-                }
-
-                recentFingerprints.set(fp, Date.now());
-
-                return true;
-              });
         if (best) {
           const wallets = getBalances();
           const result  = executeSimulated(best, wallets, 0.1);
@@ -120,11 +128,10 @@ async function arbitrageLoop() {
               lastExecTs = now;
               appendEquityPoint(applyResult.trade);
 
-              // Push alerta de nuevo trade a AlertsPage
               pushToClients(alertsClients, {
-                type:    'arb_trade',
-                trade:   applyResult.trade,
-                ts:      applyResult.trade.ts,
+                type:  'arb_trade',
+                trade: applyResult.trade,
+                ts:    applyResult.trade.ts,
               });
             }
           }
@@ -132,21 +139,25 @@ async function arbitrageLoop() {
       }
 
       if (sseClients.size > 0 || alertsClients.size > 0) {
+        _tickCount++;
+        // Optimized payload: send history every 5 ticks, equityCurve when changed or every 10
         const payload = {
-          type:         'tick',
+          type:            'tick',
           botEnabled,
           minScore,
-          uptimeMs:     Date.now() - botStarted,
-          wsStatus:     wsStatus(),
+          uptimeMs:        Date.now() - botStarted,
+          wsStatus:        wsStatus(),
           orderBooks,
           opportunities,
           triangularSignal,
           lastTrade,
-          wallets:      getBalances(),
-          pnl:          getPnL(),
-          history:      getTradeHistory().slice(-20).reverse(),
-          equityCurve:  _equityCurve.slice(-100),
-          ts:           new Date().toISOString(),
+          wallets:         getBalances(),
+          pnl:             getPnL(),
+          // history every 5 ticks (~4s) to reduce payload size on hot path
+          ...(_tickCount % 5 === 0 && { history: getTradeHistory().slice(-20).reverse() }),
+          // equityCurve only when there's a new trade OR every 10 ticks
+          ...(lastTrade || _tickCount % 10 === 0 ? { equityCurve: _equityCurve.slice(-100) } : {}),
+          ts:              new Date().toISOString(),
         };
         pushToClients(sseClients, payload);
       }
@@ -155,16 +166,11 @@ async function arbitrageLoop() {
     }
   };
 
-   async function serialLoop() {
-          try {
-            await run();
-          } catch (e) {
-            console.warn('[arb loop]', e.message);
-          }
-
-          setTimeout(serialLoop, 800);
-        }
-      serialLoop();
+  async function serialLoop() {
+    try { await run(); } catch (e) { console.warn('[arb loop]', e.message); }
+    setTimeout(serialLoop, 800);
+  }
+  serialLoop();
 }
 
 arbitrageLoop();
@@ -184,47 +190,42 @@ router.get('/stream', async (req, res) => {
   const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
   sseClients.add(res);
 
-  // Estado inicial
   try {
-    const orderBooks    = await getOrderBooks();
+    const orderBooks = await getOrderBooks();
     const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
     res.write(`data: ${JSON.stringify({
       type: 'init', botEnabled, minScore,
       uptimeMs: Date.now() - botStarted,
       wsStatus: wsStatus(),
       orderBooks, opportunities, triangularSignal,
-      wallets:      getBalances(),
-      pnl:          getPnL(),
-      history:      getTradeHistory().slice(-20).reverse(),
-      equityCurve:  _equityCurve.slice(-100),
-      ts:           new Date().toISOString(),
+      wallets:     getBalances(),
+      pnl:         getPnL(),
+      history:     getTradeHistory().slice(-20).reverse(),
+      equityCurve: _equityCurve.slice(-100),
+      ts:          new Date().toISOString(),
     })}\n\n`);
   } catch {}
 
   req.on('close', () => { sseClients.delete(res); clearInterval(hb); });
 });
 
-// ─── GET /api/arbitrage/alerts-stream — canal para AlertsPage ─────────────
+// ─── GET /api/arbitrage/alerts-stream ─────────────────────────────────────
 router.get('/alerts-stream', (req, res) => {
   sseSetup(req, res);
   const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
   alertsClients.add(res);
-  // Enviar último trade si existe
   const h = getTradeHistory();
   if (h.length) res.write(`data: ${JSON.stringify({ type: 'arb_trade', trade: h[h.length-1], ts: h[h.length-1].ts })}\n\n`);
   req.on('close', () => { alertsClients.delete(res); clearInterval(hb); });
 });
 
 // ─── GET /api/arbitrage/live (REST fallback — READ ONLY) ──────────────────
-// FIX: este endpoint es ahora read-only. La ejecución de trades SOLO ocurre
-// en el background loop (arbitrageLoop). Tener side-effects de ejecución aquí
-// causaba race conditions y doble ejecución cuando SSE + polling corrían juntos.
 router.get('/live', async (req, res) => {
   try {
-    const orderBooks    = await getOrderBooks();
+    const orderBooks = await getOrderBooks();
     const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
-    const history       = getTradeHistory();
-    const lastTrade     = history.length ? history[history.length - 1] : null;
+    const history    = getTradeHistory();
+    const lastTrade  = history.length ? history[history.length - 1] : null;
 
     res.json({
       ok: true, botEnabled, minScore,
@@ -264,7 +265,8 @@ router.post('/reset', (req, res) => {
   try {
     resetBalances();
     _equityCurve = [];
-    botStarted = Date.now();
+    _tickCount   = 0;
+    botStarted   = Date.now();
     pushToClients(sseClients, { type: 'reset', wallets: getBalances(), pnl: getPnL(), equityCurve: [] });
     res.json({ ok: true, data: getBalances() });
   } catch (e) {

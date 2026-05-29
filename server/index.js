@@ -9,29 +9,56 @@ const arbitrageRoutes  = require('./arbitrage.routes');
 
 const app    = express();
 app.set('x-powered-by', false);
-const PORT   = process.env.PORT || 5000;
+const PORT    = process.env.PORT || 5000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// FIX: agregar helmet para headers de seguridad y CORS con origen específico
 app.use(helmet());
+
+// ─── CORS ─────────────────────────────────────────────────────────────────
+// In production on Railway/Render: if frontend is served from the SAME Express
+// process (dist/ static), CORS is not needed at all (same-origin).
+// If frontend is on Vercel/separate domain, set FRONTEND_URL env var.
+// Fallback allows all origins in dev and any Railway-served same-origin prod.
+const allowedOrigins = (() => {
+  const origins = ['http://localhost:5173', 'http://localhost:3000'];
+  if (process.env.FRONTEND_URL) {
+    // Support comma-separated list of origins if needed
+    process.env.FRONTEND_URL.split(',').forEach(u => origins.push(u.trim()));
+  }
+  return origins;
+})();
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, cb) => {
+    // Allow requests with no origin (same-origin, curl, Postman, SSE in prod)
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // In production, if FRONTEND_URL is not set, allow the Railway/Render domain
+    // that serves this same app (same-origin proxied through express.static)
+    if (IS_PROD && !process.env.FRONTEND_URL) return cb(null, true);
+    return cb(null, false);
+  },
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type'],
+  credentials: false,
 }));
+
 app.use(express.json());
-app.use(rateLimit({ windowMs: 60_000, max: 300 }));
+app.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
 
 let dbConnected = false;
 if (process.env.MONGODB_URI) {
-  mongoose.connect(process.env.MONGODB_URI)
+  mongoose.connect(process.env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  })
     .then(() => { dbConnected = true; console.log('◈ MongoDB conectado'); })
     .catch(e => console.warn('⚠ MongoDB no disponible:', e.message));
 }
 
 app.use('/api/crypto',     cryptoRoutes);
 app.use('/api/arbitrage', arbitrageRoutes);
-app.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString(), db: dbConnected }));
+app.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString(), db: dbConnected, env: IS_PROD ? 'production' : 'development' }));
 
 const { Alert, Watchlist, Portfolio } = require('./models');
 const wrap = fn => async (req, res) => {
@@ -59,11 +86,8 @@ app.get('/api/portfolio',    wrap(() => Portfolio.find({ userId: 'default' }).so
 app.post('/api/portfolio',   wrap(req => Portfolio.create({ ...req.body, userId: 'default' })));
 app.delete('/api/portfolio/:id', wrap(req => Portfolio.findByIdAndDelete(req.params.id)));
 
-
-// ─── Dataset upload & analysis ────────────────────────────────────────────
 const { parseCSV, analyzeDataset } = require('./datasetService');
 
-// POST /api/dataset/analyze — body: { csv: "...", json: [...] }
 app.post('/api/dataset/analyze', (req, res) => {
   try {
     let rows = [];
@@ -83,7 +107,6 @@ app.post('/api/dataset/analyze', (req, res) => {
   }
 });
 
-// GET /api/dataset/example — devuelve CSV de ejemplo para testing
 app.get('/api/dataset/example', (_, res) => {
   const rows = [];
   let price = 40000;
@@ -121,7 +144,6 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
 const shutdown = (sig) => {
   console.log(`\n◈ ${sig} — shutting down...`);
   server.close(() => process.exit(0));

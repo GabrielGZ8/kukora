@@ -4,6 +4,7 @@
  * Persistencia en memoria + MongoDB opcional
  *
  * FIXES:
+ *  - [CRÍTICO] applyTrade ya NO descuenta withdrawalFeeUSD — el engine lo hace antes
  *  - applyTrade VALIDATES balances BEFORE applying; returns { ok, reason } on failure
  *  - Negative balances are REJECTED, not silently clamped to zero
  *  - Withdrawal/rebalancing fees integrated into P&L and trade records
@@ -11,6 +12,7 @@
  *  - Drawdown máximo del equity curve
  *  - Avg execution time
  *  - Streak de wins/losses consecutivos
+ *  - OKX soporte en wallets y balances
  */
 
 const mongoose = require('mongoose');
@@ -32,6 +34,7 @@ const ArbitrageOpSchema = new mongoose.Schema({
   status:         String,
   partialFill:    Boolean,
   executionMs:    Number,
+  slippageMethod: String,
   rejectionReason: String,
   ts:             { type: Date, default: Date.now },
 });
@@ -49,14 +52,18 @@ const INITIAL_BALANCES = {
     Kraken:   parseFloat(process.env.WALLET_BTC  || '1'),
     Bybit:    parseFloat(process.env.WALLET_BTC  || '1'),
     Coinbase: parseFloat(process.env.WALLET_BTC  || '1'),
+    OKX:      parseFloat(process.env.WALLET_BTC  || '1'),
   },
   USDT: {
     Binance:  parseFloat(process.env.WALLET_USDT || '70000'),
     Kraken:   parseFloat(process.env.WALLET_USDT || '70000'),
     Bybit:    parseFloat(process.env.WALLET_USDT || '70000'),
     Coinbase: parseFloat(process.env.WALLET_USDT || '70000'),
+    OKX:      parseFloat(process.env.WALLET_USDT || '70000'),
   },
 };
+
+const EXCHANGES = Object.keys(INITIAL_BALANCES.BTC);
 
 let wallets = JSON.parse(JSON.stringify(INITIAL_BALANCES));
 let tradeHistory = [];
@@ -73,9 +80,7 @@ function getBalances() {
 function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
   const buyFee  = WITHDRAWAL_FEES[buyExchange]  || { BTC: 0.0003, USDT: 6 };
   const sellFee = WITHDRAWAL_FEES[sellExchange] || { BTC: 0.0003, USDT: 6 };
-  // One-way BTC withdrawal from buy exchange (to move BTC to sell exchange)
-  const btcWithdrawal = buyFee.BTC * buyPrice;
-  // One-way USDT withdrawal from sell exchange (to move profits back to buy exchange)
+  const btcWithdrawal  = buyFee.BTC * buyPrice;
   const usdtWithdrawal = sellFee.USDT;
   return {
     btcWithdrawalUSD:  +btcWithdrawal.toFixed(4),
@@ -86,7 +91,12 @@ function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
 
 /**
  * applyTrade — validates balances BEFORE execution, rejects if insufficient.
- * Returns { ok: true } on success, { ok: false, reason: string } on failure.
+ *
+ * IMPORTANT: trade.netProfit ALREADY includes withdrawalFeeUSD deducted by
+ * detectOpportunities() in arbitrageEngine.js. Do NOT subtract it again here.
+ * We only record it for reporting/breakdown purposes.
+ *
+ * Returns { ok: true, trade } on success, { ok: false, reason } on failure.
  */
 async function applyTrade(trade) {
   const { buyExchange, sellExchange, amount, buyPrice, sellPrice, buyFee, sellFee } = trade;
@@ -119,7 +129,7 @@ async function applyTrade(trade) {
     return { ok: false, reason };
   }
 
-  // ── Compute withdrawal/rebalancing cost ───────────────────────────────
+  // ── Compute withdrawal fee for record-keeping (already in trade.netProfit) ─
   const wf = calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice);
   const withdrawalFeeUSD = wf.totalUSD;
 
@@ -132,11 +142,10 @@ async function applyTrade(trade) {
   wallets.USDT[sellExchange] += usdtGain;
 
   // Sanity guard — should never trigger after pre-flight checks above
-  const exchanges = ['Binance', 'Kraken', 'Bybit', 'Coinbase'];
-  for (const ex of exchanges) {
-    if (wallets.USDT[ex] < 0 || wallets.BTC[ex] < 0) {
+  for (const ex of EXCHANGES) {
+    if ((wallets.USDT[ex] !== undefined && wallets.USDT[ex] < -0.01) ||
+        (wallets.BTC[ex]  !== undefined && wallets.BTC[ex]  < -0.000001)) {
       console.error(`[walletManager] CRITICAL: negative balance on ${ex} after trade ${trade.id} — rolling back`);
-      // Full rollback
       wallets.USDT[buyExchange]  += usdtCost;
       wallets.BTC[buyExchange]   -= amount;
       wallets.BTC[sellExchange]  += amount;
@@ -145,15 +154,18 @@ async function applyTrade(trade) {
     }
   }
 
-  // Adjust netProfit for withdrawal fees
-  const adjustedNetProfit = +(( trade.netProfit || 0) - withdrawalFeeUSD).toFixed(4);
+  // ── FIX: netProfit already has withdrawalFeeUSD deducted by the engine ──
+  // DO NOT subtract withdrawalFeeUSD again. Only record it for breakdown.
+  const finalNetProfit = +(trade.netProfit || 0).toFixed(4);
+  const finalNetProfitPct = +((finalNetProfit / (buyPrice * amount)) * 100).toFixed(4);
+
   const enrichedTrade = {
     ...trade,
-    netProfit:        adjustedNetProfit,
-    netProfitPct:     +((adjustedNetProfit / (buyPrice * amount)) * 100).toFixed(4),
-    withdrawalFees:   withdrawalFeeUSD,
+    netProfit:        finalNetProfit,
+    netProfitPct:     finalNetProfitPct,
+    withdrawalFees:   withdrawalFeeUSD,    // for display/breakdown only
     withdrawalDetail: wf,
-    status:           adjustedNetProfit > 0 ? 'profit' : 'loss',
+    status:           finalNetProfit > 0 ? 'profit' : 'loss',
     balancesAfter:    getBalances(),
   };
 
@@ -168,8 +180,8 @@ async function applyTrade(trade) {
         sellPrice:      trade.sellPrice,
         amount:         trade.amount,
         grossProfit:    trade.grossProfit,
-        netProfit:      adjustedNetProfit,
-        netProfitPct:   enrichedTrade.netProfitPct,
+        netProfit:      finalNetProfit,
+        netProfitPct:   finalNetProfitPct,
         fees:           (trade.buyFee || 0) + (trade.sellFee || 0),
         slippage:       trade.slippage,
         withdrawalFees: withdrawalFeeUSD,
@@ -177,6 +189,7 @@ async function applyTrade(trade) {
         status:         enrichedTrade.status,
         partialFill:    trade.partialFill,
         executionMs:    trade.executionMs,
+        slippageMethod: trade.slippageMethod,
         ts:             new Date(trade.ts),
       });
     } catch (e) {
@@ -205,6 +218,7 @@ function getPnL() {
       avgExecutionMs: 0, maxDrawdown: 0,
       currentStreak: 0, currentStreakType: null,
       avgNetProfitPct: 0, totalFees: 0, totalWithdrawalFees: 0,
+      slippageMethodBreakdown: {},
     };
   }
 
@@ -214,9 +228,8 @@ function getPnL() {
   const winRate  = (wins.length / tradeHistory.length) * 100;
 
   const realizedPnl   = totalPnl;
-  const unrealizedPnl = 0; // spot arb closes immediately
+  const unrealizedPnl = 0;
 
-  // Max drawdown of equity curve
   let peak = 0, cum = 0, maxDrawdown = 0;
   for (const t of tradeHistory) {
     cum += t.netProfit || 0;
@@ -225,7 +238,6 @@ function getPnL() {
     if (dd > maxDrawdown) maxDrawdown = dd;
   }
 
-  // Current streak
   let currentStreak = 0, currentStreakType = null;
   for (let i = tradeHistory.length - 1; i >= 0; i--) {
     const isWin = (tradeHistory[i].netProfit || 0) > 0;
@@ -241,7 +253,13 @@ function getPnL() {
   const totalFees         = tradeHistory.reduce((s, t) => s + (t.totalFees || (t.buyFee||0) + (t.sellFee||0)), 0);
   const totalWithdrawalFees = tradeHistory.reduce((s, t) => s + (t.withdrawalFees || 0), 0);
 
-  // Pair breakdown
+  // Slippage method breakdown (real vs fallback)
+  const slippageMethodBreakdown = { real: 0, fallback: 0 };
+  tradeHistory.forEach(t => {
+    if (t.slippageMethod === 'real') slippageMethodBreakdown.real++;
+    else slippageMethodBreakdown.fallback++;
+  });
+
   const pairStats = {};
   tradeHistory.forEach(t => {
     const key = `${t.buyExchange}→${t.sellExchange}`;
@@ -269,6 +287,7 @@ function getPnL() {
     avgNetProfitPct:      +avgNetProfitPct.toFixed(4),
     totalFees:            +totalFees.toFixed(4),
     totalWithdrawalFees:  +totalWithdrawalFees.toFixed(4),
+    slippageMethodBreakdown,
     pairStats,
   };
 }
@@ -282,4 +301,5 @@ module.exports = {
   ArbitrageOp,
   WITHDRAWAL_FEES,
   calcWithdrawalFee,
+  EXCHANGES,
 };

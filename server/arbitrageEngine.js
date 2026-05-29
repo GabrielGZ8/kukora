@@ -1,25 +1,34 @@
 /**
  * arbitrageEngine.js — kukora arbitrage
- * Detección con slippage real desde orderbook depth
+ * Detección con slippage real desde orderbook depth (TODOS los exchanges)
  * Score compuesto: rentabilidad + velocidad + liquidez + confianza
  *
- * MEJORAS:
- *  - scoreOpportunity ahora incluye factor de "fee efficiency" (penaliza exchanges costosos)
- *  - P&L realizado vs no realizado separados
- *  - Detección de "oportunidad triangular" como señal visual (sin ejecución)
- *  - Confidence intervals en netProfit basados en volatilidad histórica del slippage
+ * FIXES & IMPROVEMENTS:
+ *  - Real VWAP slippage for ALL exchanges (Binance, Kraken, Bybit, OKX) — not just Binance
+ *  - slippageMethod field: 'real' | 'fallback' per leg — visible in UI/history
+ *  - Liquidity validation: reject opportunities where depth can't fill the order
+ *  - withdrawalFeeUSD deducted ONCE here in detectOpportunities (NOT again in walletManager)
+ *  - scoreOpportunity: fee efficiency + slippage method bonus
+ *  - OKX included in all pair combinations
+ *  - circuitBreaker: spread > 3% (was 5%) — tighter filter for stale data
+ *  - Min viable threshold: netProfit must be > $0.50 (not just > 0) to avoid micro-noise trades
+ *  - Triangular signal updated for 5 exchanges
  */
 
-const { calcRealSlippage }                    = require('./exchangeService');
+const { calcRealSlippage, getDepth }                    = require('./exchangeService');
 const { TRADING_FEES: FEES, WITHDRAWAL_FEES, SLIPPAGE_RATE } = require('./feeConfig');
 
-const SLIPPAGE_FIXED = SLIPPAGE_RATE; // alias kept for readability
+const SLIPPAGE_FIXED = SLIPPAGE_RATE;
+const MIN_NET_PROFIT = 0.50; // USD — minimum viable net profit per trade
+const MAX_SPREAD_PCT  = 3.0;  // circuit breaker upper bound (tighter than old 5%)
+const MIN_SPREAD_PCT  = 0.08; // circuit breaker lower bound
 
 // ─── Historial de slippage para calcular CI ───────────────────────────────
-const _slippageHistory = []; // últimos 50 valores reales observados
-const MAX_SLIP_HISTORY = 50;
+const _slippageHistory = [];
+const MAX_SLIP_HISTORY = 100;
 
 function recordSlippage(pct) {
+  if (pct == null || isNaN(pct)) return;
   _slippageHistory.push(pct);
   if (_slippageHistory.length > MAX_SLIP_HISTORY) _slippageHistory.shift();
 }
@@ -33,22 +42,22 @@ function slippageStdDev() {
 
 // ─── Score compuesto 0-100 ────────────────────────────────────────────────
 // Factores:
-//   profitability (55%): netProfitPct normalizado
-//   speed (20%):         penaliza latencia alta
-//   liquidity (10%):     slippage bajo = mejor liquidez
-//   confidence (10%):    fuente WS > HTTP (más fresco)
-//   feeEfficiency (5%):  penaliza si los fees son > 50% del gross profit
+//   profitability   (50%): netProfitPct normalizado
+//   speed           (20%): penaliza latencia alta
+//   liquidity       (15%): slippage bajo = mejor liquidez
+//   confidence      (10%): fuente WS > HTTP (más fresco)
+//   slippageQuality (5%):  real VWAP > fallback
 function scoreOpportunity(op) {
-  // Profitability: 0–100, cada 0.1% de ganancia neta = +20 pts (cap 55)
-  const profScore = Math.min(55, (op.netProfitPct / 0.1) * 20);
+  // Profitability: 0–50, cada 0.1% de ganancia neta = +20 pts (cap 50)
+  const profScore = Math.min(50, (op.netProfitPct / 0.1) * 20);
 
   // Speed: latencia total < 50ms = 20pts, penaliza 1pt por cada 50ms extra
   const totalLatency = (op.buyLatency || 0) + (op.sellLatency || 0);
   const speedScore = Math.max(0, 20 - Math.floor(totalLatency / 50));
 
-  // Liquidity: slippagePct bajo = mejor; < 0.01% = full marks
+  // Liquidity: slippagePct bajo = mejor; real data beats fallback
   const slipScore = op.slippagePct != null
-    ? Math.max(0, 10 - (op.slippagePct / 0.01) * 2)
+    ? Math.max(0, 15 - (op.slippagePct / 0.01) * 3)
     : 5;
 
   // Confidence: ambas fuentes WS = 10pts, una WS = 7pts, HTTP = 5pts
@@ -56,16 +65,53 @@ function scoreOpportunity(op) {
   const anyWs  = op.buySource === 'ws' || op.sellSource === 'ws';
   const confScore = bothWs ? 10 : anyWs ? 7 : 5;
 
-  // Fee efficiency: penaliza si fees+slippage+withdrawal > 40% del gross
-  let feeScore = 5;
-  if (op.grossProfit > 0 && isFinite(op.grossProfit)) {
-    const totalCost = (op.buyFee || 0) + (op.sellFee || 0) + (op.slippage || 0) + (op.withdrawalFeeUSD || 0);
-    const costRatio = totalCost / op.grossProfit;
-    feeScore = costRatio < 0.4 ? 5 : costRatio < 0.6 ? 3 : costRatio < 0.8 ? 1 : 0;
+  // Slippage quality bonus: real VWAP = 5pts, fallback = 0pts
+  const slipQualScore = op.slippageMethod === 'real' ? 5 : 0;
+
+  const total = Math.round(profScore + speedScore + slipScore + confScore + slipQualScore);
+  return Math.max(0, Math.min(100, total));
+}
+
+// ─── Compute slippage for a given exchange + side ─────────────────────────
+function computeSlippage(exchange, side, price, tradeAmount) {
+  const slip = calcRealSlippage(tradeAmount, side, exchange);
+
+  if (slip.method === 'real' && slip.slippageUSD != null) {
+    recordSlippage(slip.slippagePct);
+    return {
+      slippageUSD: slip.slippageUSD,
+      slippagePct: slip.slippagePct,
+      method: 'real',
+    };
   }
 
-  const total = Math.round(profScore + speedScore + slipScore + confScore + feeScore);
-  return Math.max(0, Math.min(100, total));
+  // Fallback: use fixed rate
+  const fallbackUSD = price * tradeAmount * SLIPPAGE_FIXED;
+  return {
+    slippageUSD: fallbackUSD,
+    slippagePct: SLIPPAGE_FIXED * 100,
+    method: 'fallback',
+  };
+}
+
+// ─── Liquidity check: can the order book fill the requested amount? ────────
+function checkLiquidity(exchange, side, amount) {
+  const depth = getDepth(exchange);
+  if (!depth) return { ok: true, reason: null, fillable: amount }; // no depth = assume ok (fallback)
+
+  const levels = side === 'buy' ? depth.asks : depth.bids;
+  if (!levels || !levels.length) return { ok: true, reason: null, fillable: amount };
+
+  let totalQty = levels.reduce((s, [,q]) => s + q, 0);
+  if (totalQty < amount * 0.5) {
+    // Book is too thin to fill even 50% of the order
+    return {
+      ok: false,
+      reason: `Liquidity too low on ${exchange} ${side}: ${totalQty.toFixed(4)} BTC available`,
+      fillable: totalQty,
+    };
+  }
+  return { ok: true, reason: null, fillable: Math.min(totalQty, amount) };
 }
 
 // ─── detectOpportunities ──────────────────────────────────────────────────
@@ -86,67 +132,75 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
       const feeA = FEES[buyEx.exchange] || 0.001;
       const feeB = FEES[sellEx.exchange] || 0.001;
 
-      let buySlippage, sellSlippage, buySlippagePct, sellSlippagePct;
-      if (buyEx.exchange === 'Binance') {
-        const s = calcRealSlippage(tradeAmount, 'buy');
-        // slippageUSD from calcRealSlippage already accounts for tradeAmount
-        buySlippage    = s.slippageUSD != null ? s.slippageUSD : askA * tradeAmount * SLIPPAGE_FIXED;
-        buySlippagePct = s.slippagePct;
-      } else {
-        // Fallback: cost = price * amount * rate  (units: USD)
-        buySlippage    = askA * tradeAmount * SLIPPAGE_FIXED;
-        buySlippagePct = SLIPPAGE_FIXED * 100;
-      }
-      if (sellEx.exchange === 'Binance') {
-        const s = calcRealSlippage(tradeAmount, 'sell');
-        sellSlippage    = s.slippageUSD != null ? s.slippageUSD : bidB * tradeAmount * SLIPPAGE_FIXED;
-        sellSlippagePct = s.slippagePct;
-      } else {
-        // Fallback: cost = price * amount * rate  (units: USD)
-        sellSlippage    = bidB * tradeAmount * SLIPPAGE_FIXED;
-        sellSlippagePct = SLIPPAGE_FIXED * 100;
-      }
+      // ── Real VWAP slippage for ALL exchanges ─────────────────────────
+      const buySlip  = computeSlippage(buyEx.exchange,  'buy',  askA, tradeAmount);
+      const sellSlip = computeSlippage(sellEx.exchange, 'sell', bidB, tradeAmount);
 
-      const slippagePct  = (buySlippagePct + sellSlippagePct) / 2;
-      const slippageCost = buySlippage + sellSlippage;
+      const slippageCost = buySlip.slippageUSD + sellSlip.slippageUSD;
+      const slippagePct  = (buySlip.slippagePct + sellSlip.slippagePct) / 2;
+      // 'real' if BOTH legs have real VWAP data; 'partial' if one; 'fallback' if neither
+      const slippageMethod = (buySlip.method === 'real' && sellSlip.method === 'real') ? 'real'
+                           : (buySlip.method === 'real' || sellSlip.method === 'real') ? 'partial'
+                           : 'fallback';
 
+      // ── Liquidity check ───────────────────────────────────────────────
+      const buyLiq  = checkLiquidity(buyEx.exchange,  'buy',  tradeAmount);
+      const sellLiq = checkLiquidity(sellEx.exchange, 'sell', tradeAmount);
+
+      // ── P&L calculation ───────────────────────────────────────────────
       const grossProfit  = (bidB - askA) * tradeAmount;
       const buyFee       = askA * tradeAmount * feeA;
       const sellFee      = bidB * tradeAmount * feeB;
 
-      // Withdrawal/rebalancing fees: BTC withdrawal from buyEx + USDT withdrawal from sellEx
+      // Withdrawal fees: BTC withdrawal from buyEx + USDT withdrawal from sellEx
       const wfBuy  = WITHDRAWAL_FEES[buyEx.exchange]  || { BTC: 0.0003, USDT: 6 };
       const wfSell = WITHDRAWAL_FEES[sellEx.exchange] || { BTC: 0.0003, USDT: 6 };
-      // Use midpoint of ask as BTC price proxy for USD conversion
       const withdrawalFeeUSD = +(wfBuy.BTC * askA + wfSell.USDT).toFixed(4);
 
+      // netProfit deducts withdrawal fee ONCE here — walletManager must NOT deduct again
       const netProfit    = grossProfit - buyFee - sellFee - slippageCost - withdrawalFeeUSD;
       const netProfitPct = (netProfit / (askA * tradeAmount)) * 100;
-      // Registrar slippage real observado para CI
-      if (buySlippagePct > 0) recordSlippage(buySlippagePct);
 
-      // Confidence interval en netProfit (±1 std del slippage histórico)
+      // Record real slippage for CI
+      if (buySlip.method === 'real') recordSlippage(buySlip.slippagePct);
+      if (sellSlip.method === 'real') recordSlippage(sellSlip.slippagePct);
+
+      // Confidence interval (±1.96σ = 95%)
       const slipStd = slippageStdDev();
       let profitLow = null, profitHigh = null;
       if (slipStd != null) {
-        const uncertainty = slipStd * 0.01 * askA * tradeAmount; // USD
+        const uncertainty = slipStd * 0.01 * askA * tradeAmount;
         profitLow  = +(netProfit - uncertainty * 1.96).toFixed(4);
         profitHigh = +(netProfit + uncertainty * 1.96).toFixed(4);
       }
 
       const spreadPct = ((bidB - askA) / askA) * 100;
-      // Circuit breaker: spread too small (<0.1%) OR suspiciously large (>5% = stale data)
-      const circuitBreaker = spreadPct < 0.1 || spreadPct > 5;
-      const viableRaw = netProfit > 0;
-      const viable = viableRaw && !circuitBreaker;
+
+      // Circuit breakers
+      const cbSpreaTooSmall = spreadPct < MIN_SPREAD_PCT;
+      const cbSpreadTooLarge = spreadPct > MAX_SPREAD_PCT; // stale data guard
+      const circuitBreaker = cbSpreaTooSmall || cbSpreadTooLarge;
+
+      // Liquidity failure blocks viability
+      const liquidityOk = buyLiq.ok && sellLiq.ok;
+
+      // Minimum profit threshold ($0.50) prevents micro-noise trades
+      const viableRaw = netProfit > MIN_NET_PROFIT;
+      const viable = viableRaw && !circuitBreaker && liquidityOk;
 
       let rejectionReason = null;
       if (!viable) {
-        if (bidB <= askA)        rejectionReason = 'Precio de compra ≥ precio de venta';
-        else if (circuitBreaker) rejectionReason = 'Spread bruto < 0.1% (circuit breaker)';
-        else {
+        if (!liquidityOk) {
+          rejectionReason = buyLiq.ok ? sellLiq.reason : buyLiq.reason;
+        } else if (bidB <= askA) {
+          rejectionReason = 'Precio de compra ≥ precio de venta';
+        } else if (cbSpreaTooSmall) {
+          rejectionReason = `Spread bruto ${spreadPct.toFixed(3)}% < ${MIN_SPREAD_PCT}% (circuit breaker)`;
+        } else if (cbSpreadTooLarge) {
+          rejectionReason = `Spread bruto ${spreadPct.toFixed(2)}% > ${MAX_SPREAD_PCT}% (datos posiblemente obsoletos)`;
+        } else if (netProfit <= MIN_NET_PROFIT) {
           const totalCost = buyFee + sellFee + slippageCost + withdrawalFeeUSD;
-          rejectionReason = `Costos ($${totalCost.toFixed(2)}) > ganancia bruta ($${grossProfit.toFixed(2)}): fees $${(buyFee+sellFee).toFixed(2)} + slippage $${slippageCost.toFixed(2)} + retiro $${withdrawalFeeUSD.toFixed(2)}`;
+          rejectionReason = `Net profit $${netProfit.toFixed(4)} < $${MIN_NET_PROFIT} mínimo | Fees $${(buyFee+sellFee).toFixed(2)} + slip $${slippageCost.toFixed(2)} + retiro $${withdrawalFeeUSD.toFixed(2)}`;
         }
       }
 
@@ -163,14 +217,15 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
         totalFees:     +(buyFee + sellFee).toFixed(4),
         slippage:      +slippageCost.toFixed(4),
         slippagePct:   +slippagePct.toFixed(4),
+        slippageMethod,
         withdrawalFeeUSD: +withdrawalFeeUSD.toFixed(4),
         netProfit:     +netProfit.toFixed(4),
         netProfitPct:  +netProfitPct.toFixed(4),
-        // Confidence interval 95%
         profitLow,
         profitHigh,
         viable,
         circuitBreaker,
+        liquidityOk,
         rejectionReason,
         buyLatency:    buyEx.latencyMs || 0,
         sellLatency:   sellEx.latencyMs || 0,
@@ -190,22 +245,12 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
     return b.score - a.score || b.netProfit - a.netProfit;
   });
 
-  // Detectar señal triangular (informativa, no ejecutable en esta versión)
-  // Si hay ≥3 exchanges con datos válidos, marcamos la mejor cadena como señal
   const triangularSignal = detectTriangularSignal(valid);
 
   return { opportunities, triangularSignal };
 }
 
 // ─── Multi-leg opportunity signal ────────────────────────────────────────
-// NOTE: This is NOT true triangular arbitrage (which involves 3 currency pairs
-// on a single exchange, e.g. BTC/USDT → ETH/USDT → ETH/BTC forming a closed loop).
-// True triangular arb requires all legs on ONE exchange, which is not yet
-// supported in this version.
-//
-// What this detects: a 3-exchange sequential trade signal — a chain of two
-// back-to-back cross-exchange spreads (A→B→C) that may compound gains.
-// This is labeled "Multi-Leg Signal" in the UI to reflect what it actually is.
 function detectTriangularSignal(books) {
   if (books.length < 3) return null;
   let best = null;
@@ -214,21 +259,18 @@ function detectTriangularSignal(books) {
       if (b === a) continue;
       for (let c = 0; c < books.length; c++) {
         if (c === a || c === b) continue;
-        // Leg 1: buy on A, sell on B
         const s1 = (books[b].bid - books[a].ask) / books[a].ask;
-        // Leg 2: buy on B, sell on C (uses proceeds from Leg 1)
         const s2 = (books[c].bid - books[b].ask) / books[b].ask;
         const grossPct = (s1 + s2) * 100;
-        const feePct   = (FEES[books[a].exchange] + FEES[books[b].exchange] + FEES[books[c].exchange]) * 100;
+        const feePct   = ((FEES[books[a].exchange] || 0.001) + (FEES[books[b].exchange] || 0.001) + (FEES[books[c].exchange] || 0.001)) * 100;
         const netPct   = grossPct - feePct;
         if (netPct > 0 && (!best || netPct > best.netPct)) {
           best = {
-            path:     `${books[a].exchange} → ${books[b].exchange} → ${books[c].exchange}`,
-            netPct:   +netPct.toFixed(4),
-            grossPct: +grossPct.toFixed(4),
-            label:    `${books[a].exchange[0]}→${books[b].exchange[0]}→${books[c].exchange[0]}`,
-            // Clearly indicate this is a multi-leg cross-exchange signal
-            type:     'multi_leg_cross_exchange',
+            path:       `${books[a].exchange} → ${books[b].exchange} → ${books[c].exchange}`,
+            netPct:     +netPct.toFixed(4),
+            grossPct:   +grossPct.toFixed(4),
+            label:      `${books[a].exchange[0]}→${books[b].exchange[0]}→${books[c].exchange[0]}`,
+            type:       'multi_leg_cross_exchange',
             disclaimer: '3-exchange chain signal. Not single-exchange triangular arbitrage.',
           };
         }
@@ -244,8 +286,12 @@ function executeSimulated(opportunity, wallets, amount = 0.1) {
   const { buyExchange, sellExchange, buyPrice, sellPrice,
           netProfit, netProfitPct, grossProfit, buyFee, sellFee, slippage } = opportunity;
 
-  if (opportunity.circuitBreaker || (sellPrice - buyPrice) < 0.001 * buyPrice) {
-    return { ok: false, reason: 'Circuit breaker: spread < 0.1%' };
+  if (opportunity.circuitBreaker || (sellPrice - buyPrice) < MIN_SPREAD_PCT * 0.01 * buyPrice) {
+    return { ok: false, reason: `Circuit breaker: spread too small or invalid` };
+  }
+
+  if (!opportunity.liquidityOk) {
+    return { ok: false, reason: opportunity.rejectionReason || 'Liquidity check failed' };
   }
 
   const usdtNeeded  = buyPrice * amount;
@@ -278,6 +324,8 @@ function executeSimulated(opportunity, wallets, amount = 0.1) {
     totalFees:       +((buyFee + sellFee) * ratio).toFixed(4),
     slippage:        +(slippage   * ratio).toFixed(4),
     slippagePct:     opportunity.slippagePct,
+    slippageMethod:  opportunity.slippageMethod,
+    withdrawalFeeUSD: +(opportunity.withdrawalFeeUSD * ratio).toFixed(4),
     netProfit:       +(netProfit  * ratio).toFixed(4),
     netProfitPct:    +netProfitPct.toFixed(4),
     spreadPct:       opportunity.spreadPct,

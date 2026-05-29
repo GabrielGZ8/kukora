@@ -94,7 +94,9 @@ async function arbitrageLoop() {
                 if (op.circuitBreaker) return false;
                 if (op.score < minScore) return false;
 
-                const fp = `${op.buyExchange}-${op.sellExchange}-${Math.round(op.buyPrice)}-${Math.round(op.sellPrice)}`;
+                // Fingerprint: include both prices at 1-decimal precision + spreadPct
+                // This avoids collisions when prices differ by <$1 but spread is different
+                const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(1)}-${op.sellPrice.toFixed(1)}-${op.spreadPct.toFixed(3)}`;
 
                 const lastSeen = recentFingerprints.get(fp);
 
@@ -110,17 +112,21 @@ async function arbitrageLoop() {
           const wallets = getBalances();
           const result  = executeSimulated(best, wallets, 0.1);
           if (result.ok) {
-            await applyTrade(result.trade);
-            lastTrade  = result.trade;
-            lastExecTs = now;
-            appendEquityPoint(result.trade);
+            const applyResult = await applyTrade(result.trade);
+            if (!applyResult.ok) {
+              console.warn('[arb loop] applyTrade rejected:', applyResult.reason);
+            } else {
+              lastTrade  = applyResult.trade;
+              lastExecTs = now;
+              appendEquityPoint(applyResult.trade);
 
-            // Push alerta de nuevo trade a AlertsPage
-            pushToClients(alertsClients, {
-              type:    'arb_trade',
-              trade:   result.trade,
-              ts:      result.trade.ts,
-            });
+              // Push alerta de nuevo trade a AlertsPage
+              pushToClients(alertsClients, {
+                type:    'arb_trade',
+                trade:   applyResult.trade,
+                ts:      applyResult.trade.ts,
+              });
+            }
           }
         }
       }

@@ -10,9 +10,10 @@
  *  - Confidence intervals en netProfit basados en volatilidad histórica del slippage
  */
 
-const { FEES, calcRealSlippage } = require('./exchangeService');
+const { calcRealSlippage }                    = require('./exchangeService');
+const { TRADING_FEES: FEES, WITHDRAWAL_FEES, SLIPPAGE_RATE } = require('./feeConfig');
 
-const SLIPPAGE_FIXED = 0.0005; // fallback 0.05% por lado
+const SLIPPAGE_FIXED = SLIPPAGE_RATE; // alias kept for readability
 
 // ─── Historial de slippage para calcular CI ───────────────────────────────
 const _slippageHistory = []; // últimos 50 valores reales observados
@@ -55,10 +56,10 @@ function scoreOpportunity(op) {
   const anyWs  = op.buySource === 'ws' || op.sellSource === 'ws';
   const confScore = bothWs ? 10 : anyWs ? 7 : 5;
 
-  // Fee efficiency: penaliza si fees+slippage > 40% del gross
+  // Fee efficiency: penaliza si fees+slippage+withdrawal > 40% del gross
   let feeScore = 5;
   if (op.grossProfit > 0 && isFinite(op.grossProfit)) {
-    const totalCost = (op.buyFee || 0) + (op.sellFee || 0) + (op.slippage || 0);
+    const totalCost = (op.buyFee || 0) + (op.sellFee || 0) + (op.slippage || 0) + (op.withdrawalFeeUSD || 0);
     const costRatio = totalCost / op.grossProfit;
     feeScore = costRatio < 0.4 ? 5 : costRatio < 0.6 ? 3 : costRatio < 0.8 ? 1 : 0;
   }
@@ -88,18 +89,21 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
       let buySlippage, sellSlippage, buySlippagePct, sellSlippagePct;
       if (buyEx.exchange === 'Binance') {
         const s = calcRealSlippage(tradeAmount, 'buy');
-        buySlippage    = s.slippageUSD != null ? s.slippageUSD : askA * SLIPPAGE_FIXED;
+        // slippageUSD from calcRealSlippage already accounts for tradeAmount
+        buySlippage    = s.slippageUSD != null ? s.slippageUSD : askA * tradeAmount * SLIPPAGE_FIXED;
         buySlippagePct = s.slippagePct;
       } else {
-        buySlippage    = askA * SLIPPAGE_FIXED;
+        // Fallback: cost = price * amount * rate  (units: USD)
+        buySlippage    = askA * tradeAmount * SLIPPAGE_FIXED;
         buySlippagePct = SLIPPAGE_FIXED * 100;
       }
       if (sellEx.exchange === 'Binance') {
         const s = calcRealSlippage(tradeAmount, 'sell');
-        sellSlippage    = s.slippageUSD != null ? s.slippageUSD : bidB * SLIPPAGE_FIXED;
+        sellSlippage    = s.slippageUSD != null ? s.slippageUSD : bidB * tradeAmount * SLIPPAGE_FIXED;
         sellSlippagePct = s.slippagePct;
       } else {
-        sellSlippage    = bidB * SLIPPAGE_FIXED;
+        // Fallback: cost = price * amount * rate  (units: USD)
+        sellSlippage    = bidB * tradeAmount * SLIPPAGE_FIXED;
         sellSlippagePct = SLIPPAGE_FIXED * 100;
       }
 
@@ -109,7 +113,14 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
       const grossProfit  = (bidB - askA) * tradeAmount;
       const buyFee       = askA * tradeAmount * feeA;
       const sellFee      = bidB * tradeAmount * feeB;
-      const netProfit    = grossProfit - buyFee - sellFee - slippageCost;
+
+      // Withdrawal/rebalancing fees: BTC withdrawal from buyEx + USDT withdrawal from sellEx
+      const wfBuy  = WITHDRAWAL_FEES[buyEx.exchange]  || { BTC: 0.0003, USDT: 6 };
+      const wfSell = WITHDRAWAL_FEES[sellEx.exchange] || { BTC: 0.0003, USDT: 6 };
+      // Use midpoint of ask as BTC price proxy for USD conversion
+      const withdrawalFeeUSD = +(wfBuy.BTC * askA + wfSell.USDT).toFixed(4);
+
+      const netProfit    = grossProfit - buyFee - sellFee - slippageCost - withdrawalFeeUSD;
       const netProfitPct = (netProfit / (askA * tradeAmount)) * 100;
       // Registrar slippage real observado para CI
       if (buySlippagePct > 0) recordSlippage(buySlippagePct);
@@ -133,7 +144,10 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
       if (!viable) {
         if (bidB <= askA)        rejectionReason = 'Precio de compra ≥ precio de venta';
         else if (circuitBreaker) rejectionReason = 'Spread bruto < 0.1% (circuit breaker)';
-        else                     rejectionReason = `Fees+slippage absorben $${Math.abs(netProfit).toFixed(4)}`;
+        else {
+          const totalCost = buyFee + sellFee + slippageCost + withdrawalFeeUSD;
+          rejectionReason = `Costos ($${totalCost.toFixed(2)}) > ganancia bruta ($${grossProfit.toFixed(2)}): fees $${(buyFee+sellFee).toFixed(2)} + slippage $${slippageCost.toFixed(2)} + retiro $${withdrawalFeeUSD.toFixed(2)}`;
+        }
       }
 
       const op = {
@@ -149,6 +163,7 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
         totalFees:     +(buyFee + sellFee).toFixed(4),
         slippage:      +slippageCost.toFixed(4),
         slippagePct:   +slippagePct.toFixed(4),
+        withdrawalFeeUSD: +withdrawalFeeUSD.toFixed(4),
         netProfit:     +netProfit.toFixed(4),
         netProfitPct:  +netProfitPct.toFixed(4),
         // Confidence interval 95%
@@ -182,8 +197,15 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
   return { opportunities, triangularSignal };
 }
 
-// ─── Triangular signal detector ───────────────────────────────────────────
-// Detecta si existe A→B→C con ganancia neta (solo señal visual, sin ejecución)
+// ─── Multi-leg opportunity signal ────────────────────────────────────────
+// NOTE: This is NOT true triangular arbitrage (which involves 3 currency pairs
+// on a single exchange, e.g. BTC/USDT → ETH/USDT → ETH/BTC forming a closed loop).
+// True triangular arb requires all legs on ONE exchange, which is not yet
+// supported in this version.
+//
+// What this detects: a 3-exchange sequential trade signal — a chain of two
+// back-to-back cross-exchange spreads (A→B→C) that may compound gains.
+// This is labeled "Multi-Leg Signal" in the UI to reflect what it actually is.
 function detectTriangularSignal(books) {
   if (books.length < 3) return null;
   let best = null;
@@ -192,19 +214,22 @@ function detectTriangularSignal(books) {
       if (b === a) continue;
       for (let c = 0; c < books.length; c++) {
         if (c === a || c === b) continue;
-        // Comprar en A, vender en B, luego "rebalancear" hacia C
-        // Simplificación: gross = spread(A→B) + spread(B→C) con fee * 3
+        // Leg 1: buy on A, sell on B
         const s1 = (books[b].bid - books[a].ask) / books[a].ask;
+        // Leg 2: buy on B, sell on C (uses proceeds from Leg 1)
         const s2 = (books[c].bid - books[b].ask) / books[b].ask;
         const grossPct = (s1 + s2) * 100;
         const feePct   = (FEES[books[a].exchange] + FEES[books[b].exchange] + FEES[books[c].exchange]) * 100;
         const netPct   = grossPct - feePct;
         if (netPct > 0 && (!best || netPct > best.netPct)) {
           best = {
-            path: `${books[a].exchange} → ${books[b].exchange} → ${books[c].exchange}`,
-            netPct: +netPct.toFixed(4),
+            path:     `${books[a].exchange} → ${books[b].exchange} → ${books[c].exchange}`,
+            netPct:   +netPct.toFixed(4),
             grossPct: +grossPct.toFixed(4),
-            label: `${books[a].exchange[0]}→${books[b].exchange[0]}→${books[c].exchange[0]}`,
+            label:    `${books[a].exchange[0]}→${books[b].exchange[0]}→${books[c].exchange[0]}`,
+            // Clearly indicate this is a multi-leg cross-exchange signal
+            type:     'multi_leg_cross_exchange',
+            disclaimer: '3-exchange chain signal. Not single-exchange triangular arbitrage.',
           };
         }
       }

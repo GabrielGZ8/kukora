@@ -6,12 +6,7 @@
  * Coinbase  : HTTP fallback (no WS public para spot)
  */
 
-const FEES = {
-  Binance:  0.001,
-  Kraken:   0.0026,
-  Bybit:    0.001,
-  Coinbase: 0.006,
-};
+const { TRADING_FEES: FEES } = require('./feeConfig');
 
 // ─── Per-exchange state ────────────────────────────────────────────────────
 const _state = {
@@ -112,8 +107,13 @@ function connectKraken() {
       if (Array.isArray(msg) && msg[2] === 'ticker') {
         const t = msg[1];
         const bid = parseFloat(t.b[0]), ask = parseFloat(t.a[0]);
-        // FIX: latencia real usando campo ts si disponible
-        const latencyMs = msg[0] && typeof msg[0] === 'number' ? Math.max(0, Date.now() - msg[0] * 1000) : 0;
+        // Kraken ticker WS: msg[0] = channelID (integer), NOT a timestamp.
+        // Kraken v1 public ticker does not include an exchange-side timestamp in the
+        // ticker payload, so we record latencyMs as the round-trip time from when
+        // the WS message arrived at our process (already "now").  We cannot compute
+        // a true one-way latency without an exchange timestamp, so we leave it 0
+        // rather than fabricate a value from the channel ID.
+        const latencyMs = 0;
         _state.Kraken.data = { exchange: 'Kraken', bid, ask, spread: ask-bid, spreadPct: +((ask-bid)/ask*100).toFixed(4), ts: new Date().toISOString(), latencyMs, source: 'ws' };
         _cacheTs = 0;
       }

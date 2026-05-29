@@ -110,14 +110,20 @@ const detectMarketRegime = (prices, btcDominance = null) => {
 
   const regime = { ...REGIMES[regimeId] };
 
-  // Interpretación narrativa
+  // Interpretación narrativa — 100% deterministic based on signal values
+  const volDesc    = normVol < 0.7 ? 'en mínimos históricos' : normVol < 0.9 ? 'por debajo de la media' : normVol < 1.2 ? 'normal' : normVol < 1.5 ? 'por encima de la media' : 'en máximos elevados';
+  const trendDesc  = trend > 0.3 ? `tendencia MA positiva (+${(trend*100).toFixed(0)})` : trend < -0.3 ? `tendencia MA negativa (${(trend*100).toFixed(0)})` : 'tendencia MA lateral';
+  const momDesc    = momentum_ > 0.3 ? `momentum positivo (+${(momentum_*100).toFixed(0)})` : momentum_ < -0.3 ? `momentum negativo (${(momentum_*100).toFixed(0)})` : 'momentum neutro';
+  // Breakout timing: derived deterministically from compression ratio, no random
+  const compressionDays = normVol < 0.6 ? '3-5' : normVol < 0.75 ? '5-8' : '8-14';
+
   const interps = {
-    LIQUIDITY_COMPRESSION:  `Volatilidad contrayéndose ${(normVol * 100).toFixed(0)}% bajo la media. Compresión histórica precede movimientos explosivos en ${Math.round(Math.random() * 3 + 5)}-${Math.round(Math.random() * 5 + 10)} días.`,
-    BULLISH_EXPANSION:      `Estructura alcista confirmada. Momentum +${(momentum_ * 100).toFixed(0)} con tendencia MA positiva. Capital fluyendo hacia activos de riesgo.`,
-    BEARISH_CONTRACTION:    `Presión vendedora dominante. Risk-off activado. Momentum negativo con posible aceleración bajista si se pierden soportes.`,
-    DISTRIBUTION:           `Smart money reduciendo posiciones. Precio lateral mientras el volumen sugiere salidas graduales. Precaución.`,
-    ACCUMULATION:           `Precio consolidando en zona de soporte. Potencial acumulación institucional silenciosa antes de próxima expansión.`,
-    VOLATILE_UNCERTAINTY:   `Señales contradictorias. Alta volatilidad sin dirección clara. Esperar confirmación antes de tomar exposición direccional.`,
+    LIQUIDITY_COMPRESSION:  `Volatilidad ${volDesc} (${(normVol*100).toFixed(0)}% de la media histórica). Compresión sostenida históricamente precede expansiones en ${compressionDays} sesiones. ${trendDesc}.`,
+    BULLISH_EXPANSION:      `Estructura alcista confirmada. ${momDesc} con ${trendDesc}. Capital rotando hacia activos de riesgo. Retorno reciente: ${recentRet.toFixed(2)}%.`,
+    BEARISH_CONTRACTION:    `Presión vendedora dominante. ${momDesc}. Risk-off activado. Potencial aceleración bajista si se pierden soportes clave. Volatilidad ${volDesc}.`,
+    DISTRIBUTION:           `Smart money reduciendo posiciones. Precio lateral mientras el volumen sugiere salidas graduales. ${trendDesc}, ${momDesc}. Proceder con cautela.`,
+    ACCUMULATION:           `Precio consolidando en zona de soporte con volatilidad ${volDesc}. ${trendDesc}. Posible acumulación institucional silenciosa. ${momDesc}.`,
+    VOLATILE_UNCERTAINTY:   `Señales contradictorias. Volatilidad ${volDesc}. ${trendDesc} pero ${momDesc}. Esperar confirmación antes de tomar exposición direccional.`,
   };
 
   // Probabilidad de ruptura a 7 días (heurística cuantitativa)

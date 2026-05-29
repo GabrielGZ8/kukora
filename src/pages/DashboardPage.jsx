@@ -30,7 +30,9 @@ const REGIME_ICONS = {
 
 function calcFearGreed(coins) {
   if (!coins.length) return { score: 50, label: 'Neutral', color: '#f59e0b' };
-  const pcts = coins.map(c => c.price_change_percentage_24h || 0).filter(Boolean);
+  // FIX: keep legitimate zero values; only exclude null/undefined/NaN
+  const pcts = coins.map(c => c.price_change_percentage_24h).filter(v => v != null && !Number.isNaN(v));
+  if (!pcts.length) return { score: 50, label: 'Neutral', color: '#f59e0b' };
   const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length;
   const variance = pcts.reduce((a, b) => a + (b - mean) ** 2, 0) / pcts.length;
   const stdDev = Math.sqrt(variance);

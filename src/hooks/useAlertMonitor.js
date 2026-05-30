@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 
 const STORAGE_KEY = 'kukora_alerts_v1';
 const PRICE_CACHE_KEY = 'kukora_alert_prices';
-const CHECK_INTERVAL = 30_000; // 30s
+const CHECK_INTERVAL = 60_000; // 60s — avoid CoinGecko 429
 
 function getAlerts() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }

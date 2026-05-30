@@ -4,16 +4,12 @@
  * Persistencia en memoria + MongoDB opcional
  *
  * FIXES:
- *  - [CRÍTICO] applyTrade ya NO descuenta withdrawalFeeUSD — el engine lo hace antes
- *  - applyTrade VALIDATES balances BEFORE applying; returns { ok, reason } on failure
- *  - Negative balances are REJECTED, not silently clamped to zero
- *  - Withdrawal/rebalancing fees integrated into P&L and trade records
- *  - P&L realizado vs no-realizado separados
- *  - Drawdown máximo del equity curve
- *  - Avg execution time
- *  - Streak de wins/losses consecutivos
- *  - OKX soporte en wallets y balances
- *  - FIX: unrealizedPnl calculado desde btcPrice actual cuando se provee
+ *  - applyTrade does NOT deduct withdrawal fees from P&L
+ *    (pre-funded bilateral model: withdrawal = periodic rebalancing cost, not per-trade)
+ *  - withdrawalFeeUSD stored as informational field only
+ *  - getPnL includes rebalancingCostEstimate
+ *  - Balance validation with rollback on integrity failure
+ *  - Negative balances rejected, not silently clamped
  */
 
 const mongoose = require('mongoose');
@@ -74,7 +70,8 @@ function getBalances() {
 }
 
 /**
- * Compute withdrawal/rebalancing fee for moving assets between exchanges.
+ * calcWithdrawalFee — computes periodic rebalancing cost (informational only)
+ * Not deducted per trade in pre-funded bilateral model
  */
 function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
   const buyFee  = WITHDRAWAL_FEES[buyExchange]  || { BTC: 0.0003, USDT: 6 };
@@ -91,9 +88,9 @@ function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
 /**
  * applyTrade — validates balances BEFORE execution, rejects if insufficient.
  *
- * IMPORTANT: trade.netProfit ALREADY includes withdrawalFeeUSD deducted by
- * detectOpportunities() in arbitrageEngine.js. Do NOT subtract it again here.
- * We only record it for reporting/breakdown purposes.
+ * IMPORTANT: Pre-funded bilateral model — withdrawal fees are NOT deducted per trade.
+ * trade.netProfit is already calculated without withdrawal fees in arbitrageEngine.js.
+ * withdrawalFeeUSD is stored as informational field only.
  */
 async function applyTrade(trade) {
   const { buyExchange, sellExchange, amount, buyPrice, sellPrice, buyFee, sellFee } = trade;
@@ -125,8 +122,8 @@ async function applyTrade(trade) {
     return { ok: false, reason };
   }
 
+  // Informational only — not deducted from balances or P&L
   const wf = calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice);
-  const withdrawalFeeUSD = wf.totalUSD;
 
   const usdtGain = sellPrice * amount - (sellFee || 0);
 
@@ -147,15 +144,17 @@ async function applyTrade(trade) {
     }
   }
 
-  const finalNetProfit = +(trade.netProfit || 0).toFixed(4);
+  const finalNetProfit    = +(trade.netProfit || 0).toFixed(4);
   const finalNetProfitPct = +((finalNetProfit / (buyPrice * amount)) * 100).toFixed(4);
 
   const enrichedTrade = {
     ...trade,
     netProfit:        finalNetProfit,
     netProfitPct:     finalNetProfitPct,
-    withdrawalFees:   withdrawalFeeUSD,
+    // Informational only — reflects periodic rebalancing estimate, not per-trade cost
+    withdrawalFees:   trade.withdrawalFeeUSD || 0,
     withdrawalDetail: wf,
+    withdrawalModel:  'periodic_rebalancing',
     status:           finalNetProfit > 0 ? 'profit' : 'loss',
     balancesAfter:    getBalances(),
   };
@@ -175,7 +174,7 @@ async function applyTrade(trade) {
         netProfitPct:   finalNetProfitPct,
         fees:           (trade.buyFee || 0) + (trade.sellFee || 0),
         slippage:       trade.slippage,
-        withdrawalFees: withdrawalFeeUSD,
+        withdrawalFees: trade.withdrawalFeeUSD || 0,
         spreadPct:      trade.spreadPct,
         status:         enrichedTrade.status,
         partialFill:    trade.partialFill,
@@ -202,10 +201,7 @@ function getTradeHistory() {
 
 /**
  * getPnL — returns realized and unrealized P&L.
- *
- * @param {number|null} currentBtcPrice — optional current BTC ask price.
- *   If provided, unrealizedPnl = (totalCurrentBtc - totalInitialBtc) * currentBtcPrice.
- *   If omitted, unrealizedPnl = 0.
+ * Includes rebalancingCostEstimate for informational display.
  */
 function getPnL(currentBtcPrice = null) {
   if (!tradeHistory.length) {
@@ -217,6 +213,7 @@ function getPnL(currentBtcPrice = null) {
       currentStreak: 0, currentStreakType: null,
       avgNetProfitPct: 0, totalFees: 0, totalWithdrawalFees: 0,
       slippageMethodBreakdown: {},
+      rebalancingCostEstimate: 0,
     };
   }
 
@@ -225,7 +222,6 @@ function getPnL(currentBtcPrice = null) {
   const realizedPnl = tradeHistory.reduce((s, t) => s + (t.netProfit || 0), 0);
   const winRate  = (wins.length / tradeHistory.length) * 100;
 
-  // FIX: unrealizedPnl reflects change in BTC value vs initial allocation
   let unrealizedPnl = 0;
   if (currentBtcPrice != null && currentBtcPrice > 0) {
     const totalCurrentBtc = EXCHANGES.reduce((s, ex) => s + (wallets.BTC[ex] || 0), 0);
@@ -252,11 +248,16 @@ function getPnL(currentBtcPrice = null) {
     else break;
   }
 
-  const sorted            = [...tradeHistory].sort((a, b) => (b.netProfit||0) - (a.netProfit||0));
-  const avgExecutionMs    = tradeHistory.reduce((s, t) => s + (t.executionMs || 0), 0) / tradeHistory.length;
-  const avgNetProfitPct   = tradeHistory.reduce((s, t) => s + (t.netProfitPct || 0), 0) / tradeHistory.length;
-  const totalFees         = tradeHistory.reduce((s, t) => s + (t.totalFees || (t.buyFee||0) + (t.sellFee||0)), 0);
+  const sorted          = [...tradeHistory].sort((a, b) => (b.netProfit||0) - (a.netProfit||0));
+  const avgExecutionMs  = tradeHistory.reduce((s, t) => s + (t.executionMs || 0), 0) / tradeHistory.length;
+  const avgNetProfitPct = tradeHistory.reduce((s, t) => s + (t.netProfitPct || 0), 0) / tradeHistory.length;
+  const totalFees       = tradeHistory.reduce((s, t) => s + (t.totalFees || (t.buyFee||0) + (t.sellFee||0)), 0);
   const totalWithdrawalFees = tradeHistory.reduce((s, t) => s + (t.withdrawalFees || 0), 0);
+
+  // Rebalancing cost estimate: ~$30 per round, 1 round per 50 trades
+  const tradesCount = tradeHistory.length;
+  const rebalancingRounds = Math.max(1, Math.ceil(tradesCount / 50));
+  const rebalancingCostEstimate = +(rebalancingRounds * 30).toFixed(2);
 
   const slippageMethodBreakdown = { real: 0, fallback: 0 };
   tradeHistory.forEach(t => {
@@ -270,7 +271,6 @@ function getPnL(currentBtcPrice = null) {
     if (!pairStats[key]) pairStats[key] = { count: 0, totalPnl: 0, wins: 0, totalFees: 0, totalWithdrawalFees: 0 };
     pairStats[key].count++;
     pairStats[key].totalPnl += t.netProfit || 0;
-    // Only trading fees here — withdrawalFees already reflected in netProfit (deducted once in arbitrageEngine)
     pairStats[key].totalFees += (t.totalFees || (t.buyFee||0) + (t.sellFee||0));
     pairStats[key].totalWithdrawalFees = (pairStats[key].totalWithdrawalFees || 0) + (t.withdrawalFees || 0);
     if ((t.netProfit || 0) > 0) pairStats[key].wins++;
@@ -295,6 +295,7 @@ function getPnL(currentBtcPrice = null) {
     totalWithdrawalFees:  +totalWithdrawalFees.toFixed(4),
     slippageMethodBreakdown,
     pairStats,
+    rebalancingCostEstimate,
   };
 }
 

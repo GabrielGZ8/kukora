@@ -1,19 +1,15 @@
 /**
- * ArbitragePage.jsx — kukora arbitrage bot
- * SSE real-time | 4 WS (Binance+Kraken+Bybit+OKX) | score slider | equity persistente
- * MEJORAS:
- *  - OKX incluido en order books, wallets, WS status
- *  - Slippage method badge: VWAP REAL vs est. (fallback)
- *  - history y equityCurve se preservan entre ticks (solo se sobreescriben cuando vienen en payload)
- *  - Withdrawal fee breakdown en historial
- *  - Slippage breakdown por leg en oportunidades
- *  - maxDrawdown y slippageMethodBreakdown en header
+ * ArbitragePage.jsx — kukora arbitrage bot v6
+ * "Oportunidades Detectadas" como elemento hero principal.
+ * Progressive disclosure: hero → métricas → detalles técnicos.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts';
 import { useArbitrageStream } from '../hooks/useArbitrageStream';
-import { usePolling } from '../hooks/usePolling';
 import toast from 'react-hot-toast';
+import ExecutiveDashboard from '../components/common/ExecutiveDashboard';
+import LifecyclePanel from '../components/common/LifecyclePanel';
+import IntelligencePanel from '../components/common/IntelligencePanel';
 
 const fmt    = (n, d=2)  => (n==null||isNaN(n)) ? '—' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtP   = (n, d=4)  => (n==null||isNaN(n)) ? '—' : `$${Number(n).toFixed(d)}`;
@@ -21,104 +17,250 @@ const fmtPct = n          => (n==null||isNaN(n)) ? '—' : `${Number(n).toFixed(
 const ago = ts => {
   if (!ts) return '—';
   const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 2) return 'ahora'; if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`; return `${Math.floor(s/3600)}h ago`;
+  if (s < 2) return 'ahora'; if (s < 60) return `${s}s`; return `${Math.floor(s/60)}m`;
 };
+
+const translateRejection = (reason) => {
+  if (!reason) return null;
+  if (reason.includes('Liquidez') || reason.includes('Liquidity')) return 'Liquidez insuficiente';
+  if (reason.includes('Spread') && reason.includes('<')) return 'Spread bajo umbral';
+  if (reason.includes('Spread') && reason.includes('>')) return 'Feed lento';
+  if (reason.includes('Net') || reason.includes('mínimo')) return 'Fees > spread';
+  if (reason.includes('Precio de compra')) return 'Precio compra ≥ venta';
+  if (reason.includes('Circuit') || reason.includes('circuit')) return 'Circuit breaker';
+  if (reason.includes('Saldo')) return 'Saldo insuficiente';
+  if (reason.includes('Coinbase')) return 'Coinbase fee 0.60%';
+  return reason.slice(0, 45);
+};
+
 const uptime = ms => {
   if (!ms) return '—';
   const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60);
   if (h>0) return `${h}h ${m%60}m`; if (m>0) return `${m}m ${s%60}s`; return `${s}s`;
 };
 
-const EX_COLORS = { Binance:'#F0B90B', Kraken:'#5741D9', Bybit:'#F7A600', Coinbase:'#0052FF', OKX:'#000000' };
-const EX_COLORS_DARK = { ...EX_COLORS, OKX:'#aaa' }; // OKX on dark background
+const EX_COLORS = { Binance:'#F0B90B', Kraken:'#5741D9', Bybit:'#F7A600', Coinbase:'#0052FF', OKX:'#aaa' };
 const scoreColor = s => s>=61?'var(--color-green)':s>=31?'var(--color-yellow)':'var(--color-red)';
-const scoreBg    = s => s>=61?'var(--color-green-dim)':s>=31?'var(--color-yellow-dim)':'var(--color-red-dim)';
 const latColor   = ms => ms===0?'var(--color-green)':ms<80?'var(--color-green)':ms<400?'var(--color-yellow)':'var(--color-red)';
 const latLabel   = ms => ms===0?'WS':`${ms}ms`;
-
 const ALL_EXCHANGES = ['Binance','Kraken','Bybit','OKX','Coinbase'];
 
-// ─── Sub-components ───────────────────────────────────────────────────────
-function StatusBadge({ viable, circuitBreaker, rejectionReason }) {
-  if (viable) return <span style={{ background:'var(--color-green-dim)', color:'var(--color-green)', fontWeight:700, fontSize:10, padding:'2px 8px', borderRadius:99, letterSpacing:'0.04em', whiteSpace:'nowrap' }}>⚡ VIABLE</span>;
-  if (circuitBreaker) return <span style={{ background:'var(--color-yellow-dim)', color:'var(--color-yellow)', fontWeight:700, fontSize:10, padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>⛔ CB</span>;
-  return <span style={{ background:'var(--color-red-dim)', color:'var(--color-red)', fontWeight:700, fontSize:10, padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }} title={rejectionReason}>✗ NO VIABLE</span>;
-}
-function ScoreBadge({ score }) {
-  if (!score) return null;
-  return <span style={{ background:scoreBg(score), color:scoreColor(score), fontWeight:800, fontSize:10, padding:'2px 8px', borderRadius:99, fontFamily:'var(--font-mono)', minWidth:42, textAlign:'center', display:'inline-block' }}>{score}/100</span>;
-}
-function WsBadge({ on }) {
-  return <span style={{ background:on?'rgba(0,82,255,0.08)':'transparent', color:on?'#0052FF':'var(--text-dim)', fontWeight:700, fontSize:9, padding:'1px 5px', borderRadius:4, border:`1px solid ${on?'rgba(0,82,255,0.25)':'var(--border)'}`, letterSpacing:'0.05em' }}>{on?'WS':'HTTP'}</span>;
-}
-function SlippageBadge({ method }) {
-  if (!method) return null;
-  const isReal    = method === 'real';
-  const isPartial = method === 'partial';
-  const label     = isReal ? 'VWAP L2' : isPartial ? 'VWAP ½' : 'est.';
-  const color     = isReal ? 'var(--color-green)' : isPartial ? 'var(--color-yellow)' : 'var(--text-dim)';
-  const bg        = isReal ? 'var(--color-green-dim)' : isPartial ? 'var(--color-yellow-dim)' : 'var(--bg-surface-2)';
+// ─── Shared components ────────────────────────────────────────────────────
+function Card({ children, style, glow }) {
   return (
-    <span title={isReal ? 'Slippage calculado desde L2 VWAP real del order book (Binance/Kraken/Bybit/OKX)' : isPartial ? 'Un leg con VWAP real, otro con fallback 0.05%' : 'Fallback fijo 0.05% — sin acceso a L2 depth (siempre activo en Coinbase, que no expone order book público)'}
-      style={{ background:bg, color, fontWeight:700, fontSize:8, padding:'1px 5px', borderRadius:3, border:`1px solid ${color}44`, letterSpacing:'0.05em', whiteSpace:'nowrap' }}>
-      {label}
-    </span>
+    <div style={{
+      background: 'var(--bg-surface)', border: `1px solid ${glow ? 'rgba(0,184,122,0.40)' : 'var(--border)'}`,
+      borderRadius: 'var(--radius-lg)', boxShadow: glow ? '0 0 24px rgba(0,184,122,0.12), var(--shadow-card)' : 'var(--shadow-card)',
+      transition: 'border-color 0.3s, box-shadow 0.3s',
+      ...style,
+    }}>{children}</div>
   );
 }
-function ExDot({ name }) {
-  const color = EX_COLORS_DARK[name] || '#999';
-  return <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}><span style={{ width:8, height:8, borderRadius:'50%', background:color, flexShrink:0, border:name==='OKX'?'1px solid #555':'none' }}/><span>{name}</span></span>;
-}
-function Card({ children, style }) {
-  return <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', boxShadow:'var(--shadow-card)', ...style }}>{children}</div>;
-}
-function SectionTitle({ children, right }) {
+function SectionTitle({ children, right, sub }) {
   return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 18px', borderBottom:'1px solid var(--border)' }}>
-      <span style={{ fontWeight:800, fontSize:13, color:'var(--text)', letterSpacing:'-0.01em' }}>{children}</span>
+      <div>
+        <span style={{ fontWeight:800, fontSize:13, color:'var(--text)', letterSpacing:'-0.01em' }}>{children}</span>
+        {sub && <div style={{ fontSize:10, color:'var(--text-dim)', marginTop:1 }}>{sub}</div>}
+      </div>
       {right && <div style={{ display:'flex', alignItems:'center', gap:8 }}>{right}</div>}
     </div>
   );
 }
-function ScoreBar({ score }) {
-  return <div style={{ width:60, height:5, background:'var(--border)', borderRadius:3, overflow:'hidden', display:'inline-block', verticalAlign:'middle', marginRight:4 }}><div style={{ width:`${score||0}%`, height:'100%', background:scoreColor(score), transition:'width 0.3s' }}/></div>;
+function ExDot({ name, size=8 }) {
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
+      <span style={{ width:size, height:size, borderRadius:'50%', background:EX_COLORS[name]||'#999', flexShrink:0 }}/>
+      <span>{name}</span>
+    </span>
+  );
+}
+function SlippageBadge({ method }) {
+  if (!method) return null;
+  const isReal = method==='real', isPartial = method==='partial';
+  const label = isReal?'VWAP L2':isPartial?'VWAP ½':'est.';
+  const color = isReal?'var(--color-green)':isPartial?'var(--color-yellow)':'var(--text-dim)';
+  return (
+    <span title={isReal?'Slippage calculado desde L2 VWAP real':isPartial?'Un leg VWAP, otro fallback':'Fallback fijo 0.05%'}
+      style={{ background:`${color}20`, color, fontWeight:700, fontSize:8, padding:'1px 5px', borderRadius:3, border:`1px solid ${color}44`, whiteSpace:'nowrap' }}>
+      {label}
+    </span>
+  );
+}
+function WsBadge({ on }) {
+  return (
+    <span style={{ background:on?'rgba(0,82,255,0.08)':'transparent', color:on?'#0052FF':'var(--text-dim)', fontWeight:700, fontSize:9, padding:'1px 5px', borderRadius:4, border:`1px solid ${on?'rgba(0,82,255,0.25)':'var(--border)'}` }}>
+      {on?'WS':'HTTP'}
+    </span>
+  );
 }
 
-function TriangularSignalBanner({ signal }) {
-  if (!signal) return null;
+// ─── Hero Opportunity Card ─────────────────────────────────────────────────
+function OpportunityHero({ op, minScore, rank }) {
+  const isViable = op.viable && op.score >= minScore;
+  const isSynthetic = op.synthetic;
+
+  const borderColor = isViable
+    ? (isSynthetic ? 'rgba(255,200,0,0.5)' : 'rgba(0,184,122,0.50)')
+    : op.circuitBreaker ? 'rgba(245,158,11,0.30)' : 'var(--border)';
+  const bgGradient = isViable
+    ? (isSynthetic
+        ? 'linear-gradient(135deg, rgba(255,200,0,0.06), rgba(255,140,0,0.03))'
+        : 'linear-gradient(135deg, rgba(0,184,122,0.07), rgba(0,184,122,0.02))')
+    : 'var(--bg-surface-2)';
+
   return (
-    <div style={{ background:'linear-gradient(135deg, rgba(88,65,217,0.12), rgba(88,65,217,0.06))', border:'1px solid rgba(88,65,217,0.30)', borderRadius:'var(--radius)', padding:'10px 16px', display:'flex', alignItems:'center', gap:12, fontSize:12 }}>
-      <span style={{display:"inline-flex",alignItems:"center"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
-      <div style={{ flex:1 }}>
-        <span style={{ fontWeight:800, color:'#5741D9' }}>Multi-Leg Signal detectado</span>
-        <span style={{ color:'var(--text-muted)', marginLeft:8 }}>{signal.path}</span>
+    <div style={{
+      padding: '14px 16px',
+      background: bgGradient,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 12,
+      opacity: op.viable && op.score < minScore ? 0.5 : 1,
+      position: 'relative',
+    }}>
+      {/* Rank badge */}
+      {rank <= 3 && isViable && (
+        <div style={{ position:'absolute', top:-6, left:12, background: rank===1?'#FF2D78':rank===2?'#5741D9':'#F59E0B', color:'#fff', fontSize:9, fontWeight:900, padding:'2px 8px', borderRadius:99 }}>
+          #{rank} VIABLE
+        </div>
+      )}
+
+      {/* Row 1: Status + pair + profit */}
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginTop: rank<=3&&isViable ? 6 : 0 }}>
+        {/* Status pill */}
+        {isViable ? (
+          <span style={{ background: isSynthetic?'rgba(255,200,0,0.15)':'rgba(0,184,122,0.12)', color: isSynthetic?'#F59E0B':'var(--color-green)', fontWeight:800, fontSize:11, padding:'3px 10px', borderRadius:99, border:`1px solid ${isSynthetic?'rgba(255,200,0,0.3)':'rgba(0,184,122,0.3)'}`, whiteSpace:'nowrap', letterSpacing:'0.02em' }}>
+            {isSynthetic ? '🎬 DEMO' : '⚡ VIABLE'}
+          </span>
+        ) : op.circuitBreaker ? (
+          <span style={{ background:'rgba(245,158,11,0.10)', color:'#F59E0B', fontWeight:800, fontSize:11, padding:'3px 10px', borderRadius:99 }}>⛔ CIRCUIT BREAKER</span>
+        ) : (
+          <span style={{ background:'var(--color-red-dim)', color:'var(--color-red)', fontWeight:700, fontSize:11, padding:'3px 10px', borderRadius:99, maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={op.rejectionReason}>
+            ✗ {translateRejection(op.rejectionReason) || 'RECHAZADO'}
+          </span>
+        )}
+
+        {/* Score */}
+        {op.viable && (
+          <span style={{ background:`${scoreColor(op.score)}18`, color:scoreColor(op.score), fontWeight:900, fontSize:12, padding:'3px 10px', borderRadius:6, fontFamily:'var(--font-mono)', border:`1px solid ${scoreColor(op.score)}33` }}>
+            {op.score}/100
+          </span>
+        )}
+
+        <SlippageBadge method={op.slippageMethod} />
+
+        {/* Trade direction */}
+        <span style={{ fontSize:13, fontWeight:700, flex:1 }}>
+          <span style={{ color:EX_COLORS[op.buyExchange]||'#aaa' }}>COMPRA</span>
+          <span style={{ fontFamily:'var(--font-mono)', fontWeight:800 }}> ${fmt(op.buyPrice)} </span>
+          <span style={{ color:'var(--text-dim)' }}>→</span>
+          <span style={{ color:EX_COLORS[op.sellExchange]||'#aaa' }}> VENDE</span>
+          <span style={{ fontFamily:'var(--font-mono)', fontWeight:800 }}> ${fmt(op.sellPrice)}</span>
+        </span>
+
+        {/* Net profit — biggest number */}
+        <div style={{ marginLeft:'auto', textAlign:'right' }}>
+          <div style={{ fontFamily:'var(--font-mono)', fontWeight:900, fontSize:16, color: op.netProfit>0?'var(--color-green)':'var(--color-red)', lineHeight:1 }}>
+            {op.netProfit>0?'+':''}{fmtP(op.netProfit,4)}
+          </div>
+          <div style={{ fontSize:10, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>{fmtPct(op.netProfitPct)}</div>
+          {op.profitLow!=null && op.viable && (
+            <div style={{ fontSize:8, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>95% CI [{fmtP(op.profitLow,2)}, {fmtP(op.profitHigh,2)}]</div>
+          )}
+        </div>
       </div>
-      <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, color:'#5741D9', fontSize:13 }}>+{signal.netPct.toFixed(4)}% neto</span>
-      <span style={{ fontSize:9, color:'var(--text-dim)', background:'rgba(88,65,217,0.12)', padding:'2px 7px', borderRadius:4, fontWeight:700, letterSpacing:'0.05em' }}>SEÑAL</span>
+
+      {/* Row 2: exchange names + fee breakdown */}
+      <div style={{ display:'flex', gap:10, marginTop:8, flexWrap:'wrap', alignItems:'center', fontSize:11 }}>
+        <ExDot name={op.buyExchange} />
+        <span style={{ color:'var(--text-dim)' }}>→</span>
+        <ExDot name={op.sellExchange} />
+        <span style={{ color:'var(--border)', margin:'0 2px' }}>|</span>
+        <span style={{ color:'var(--text-dim)' }}>Bruto: <span style={{ fontFamily:'var(--font-mono)', color:'var(--text-muted)' }}>${fmt(op.grossProfit,4)}</span></span>
+        <span style={{ color:'var(--text-dim)' }}>Fees: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt((op.buyFee||0)+(op.sellFee||0),4)}</span></span>
+        <span style={{ color:'var(--text-dim)' }}>Slip: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(op.slippage,4)}</span></span>
+        <span style={{ color:'var(--text-dim)' }}>Spread: <span style={{ fontFamily:'var(--font-mono)' }}>{op.spreadPct?.toFixed(3)||'—'}%</span></span>
+        {op.breakEvenPct != null && (
+          <span style={{ color:'var(--text-dim)' }}>Break-even: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-yellow)' }}>{op.breakEvenPct}%</span></span>
+        )}
+        {op.fillProbability != null && (
+          <span title="Probabilidad de ejecución completa" style={{ color:'var(--text-dim)' }}>
+            P(fill): <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, color: op.fillProbability>=80?'var(--color-green)':op.fillProbability>=50?'var(--color-yellow)':'var(--color-red)' }}>{op.fillProbability}%</span>
+          </span>
+        )}
+        {op.viable && op.recommendedSize != null && (
+          <span style={{ color:'var(--color-green)', fontWeight:700 }}>Rec: <span style={{ fontFamily:'var(--font-mono)' }}>{op.recommendedSize} BTC</span></span>
+        )}
+        {!op.viable && op.rejectionReason && (
+          <span style={{ color:'var(--color-red)', fontSize:10, fontStyle:'italic', maxWidth:300, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={op.rejectionReason}>
+            {translateRejection(op.rejectionReason)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────
+// ─── Scanning animation when no trades yet ────────────────────────────────
+function ScanningPulse({ opportunitiesScanned, nearViableCount, bestOpportunitySeen }) {
+  const [dots, setDots] = useState('.');
+  useEffect(() => {
+    const id = setInterval(() => setDots(d => d.length >= 3 ? '.' : d + '.'), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div style={{ padding: '32px 24px', textAlign: 'center' }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>
+        Escaneando mercados{dots}
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20 }}>
+        Analizando spreads entre 5 exchanges en tiempo real
+      </div>
+      {opportunitiesScanned > 0 && (
+        <div style={{ display: 'flex', gap: 24, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{opportunitiesScanned.toLocaleString()}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>pares analizados</div>
+          </div>
+          {nearViableCount > 0 && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 24, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--color-yellow)' }}>{nearViableCount}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>cerca de viable</div>
+            </div>
+          )}
+          {bestOpportunitySeen && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 24, fontWeight: 900, fontFamily: 'var(--font-mono)', color: bestOpportunitySeen.netProfit>0?'var(--color-green)':'var(--color-yellow)' }}>
+                {bestOpportunitySeen.netProfit>=0?'+':''}{bestOpportunitySeen.netProfit.toFixed(3)}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>mejor spread visto $</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────
 export default function ArbitragePage() {
-  const [botOn,        setBotOn]      = useState(true);
-  const [minScore,     setMinScore]   = useState(10);
-  const [pendingScore, setPending]    = useState(10);
-  const [resetting,    setResetting]  = useState(false);
-  const [confirmReset, setConfirm]    = useState(false);
+  const [botOn,        setBotOn]    = useState(true);
+  const [minScore,     setMinScore] = useState(10);
+  const [pendingScore, setPending]  = useState(10);
+  const [resetting,    setResetting]= useState(false);
+  const [confirmReset, setConfirm]  = useState(false);
+  const [activeTab,    setActiveTab]= useState('bot');
   const lastTradeIdRef  = useRef(null);
   const scoreTimeoutRef = useRef(null);
 
-  // Persistent local state for history/equityCurve — only update when payload contains them
   const [localHistory,     setLocalHistory]     = useState([]);
   const [localEquityCurve, setLocalEquityCurve] = useState([]);
 
   const { data: sseData, connected: sseOk, latencyMs: sseLatency } = useArbitrageStream();
-  const { data: pollData } = usePolling(() => fetch('/api/arbitrage/live').then(r=>r.json()), 2000);
-  const data = sseData?.orderBooks ? sseData : pollData;
+  const data = sseData ?? null;
 
-  // Update persistent local state only when payload includes the fields
   useEffect(() => {
     if (data?.history)     setLocalHistory(data.history);
     if (data?.equityCurve) setLocalEquityCurve(data.equityCurve);
@@ -144,421 +286,454 @@ export default function ArbitragePage() {
     if (t.id === lastTradeIdRef.current) return;
     lastTradeIdRef.current = t.id;
     const p = Number(t.netProfit);
-    const slip = t.slippageMethod ? ` [${t.slippageMethod === 'real' ? '⚡VWAP' : 'est'}]` : '';
-    if (p >= 0) toast.success(`⚡ ${t.buyExchange}→${t.sellExchange} | +$${p.toFixed(4)}${slip}`, { duration:4000 });
+    const synLabel = t.synthetic ? ' [DEMO]' : '';
+    if (p >= 0) toast.success(`⚡ ${t.buyExchange}→${t.sellExchange} | +$${p.toFixed(4)}${synLabel}`, { duration:4000 });
     else        toast.error(`↘ ${t.buyExchange}→${t.sellExchange} | $${p.toFixed(4)}`, { duration:3000 });
   }, [data?.lastTrade?.id]);
+
+  useEffect(() => {
+    if (data?.type !== 'trade_executed' || !data?.trade) return;
+    const t = data.trade;
+    if (t.id === lastTradeIdRef.current) return;
+    lastTradeIdRef.current = t.id;
+    const p = Number(t.netProfit);
+    if (p >= 0) toast.success(`⚡ ${t.buyExchange}→${t.sellExchange} | +$${p.toFixed(4)}`, { duration:4000 });
+    else        toast.error(`↘ ${t.buyExchange}→${t.sellExchange} | $${p.toFixed(4)}`, { duration:3000 });
+  }, [data?.trade?.id, data?.type]);
 
   const handleReset = async () => {
     if (!confirmReset) { setConfirm(true); return; }
     setResetting(true);
     try {
       await fetch('/api/arbitrage/reset',{ method:'POST' });
-      toast.success('Wallets reiniciadas');
+      toast.success('Carteras reiniciadas');
       setLocalHistory([]); setLocalEquityCurve([]);
-    }
-    catch { toast.error('Error al resetear'); }
+    } catch { toast.error('Error al reiniciar'); }
     finally { setResetting(false); setConfirm(false); }
   };
 
-  const orderBooks       = data?.orderBooks       || [];
-  const opportunities    = data?.opportunities    || [];
-  const triangularSignal = data?.triangularSignal || null;
-  const wallets          = data?.wallets          || {};
-  const pnl              = data?.pnl              || {};
-  const wsStatusMap      = data?.wsStatus         || {};
-  const dailyPnl         = data?.dailyPnl         ?? null;
+  const orderBooks        = data?.orderBooks        || [];
+  const opportunities     = data?.opportunities     || [];
+  const triangularSignal  = data?.triangularSignal  || null;
+  const wallets           = data?.wallets           || {};
+  const pnl               = data?.pnl              || {};
+  const wsStatusMap       = data?.wsStatus          || {};
+  const feedFreshness     = data?.feedFreshness     || {};
+  const dailyPnl          = data?.dailyPnl          ?? null;
   const dailyLossBreached = data?.dailyLossBreached ?? false;
-  const history          = localHistory;
-  const equityCurve      = localEquityCurve;
+  const history           = localHistory;
+  const equityCurve       = localEquityCurve;
+
+  const opportunitiesScanned = data?.opportunitiesScanned ?? 0;
+  const viableFound          = data?.viableFound          ?? 0;
+  const rejectionCounts      = data?.rejectionCounts      || {};
+  const bestOpportunitySeen  = data?.bestOpportunitySeen  || null;
+  const nearViableCount      = data?.nearViableCount      ?? 0;
 
   const validBooks  = orderBooks.filter(ob=>ob.bid&&ob.ask);
   const bestBidEx   = validBooks.reduce((b,o)=>(!b||o.bid>b.bid)?o:b,null)?.exchange;
   const bestAskEx   = validBooks.reduce((b,o)=>(!b||o.ask<b.ask)?o:b,null)?.exchange;
   const pnlColor    = (pnl.totalPnl||0)>=0?'var(--color-green)':'var(--color-red)';
   const viableCount = opportunities.filter(o=>o.viable&&o.score>=minScore).length;
-  const avgLatency  = (() => {
-    const http = validBooks.filter(o=>o.latencyMs>0);
-    return http.length ? Math.round(http.reduce((s,o)=>s+o.latencyMs,0)/http.length) : null;
-  })();
   const anyWs = Object.values(wsStatusMap).some(Boolean);
-
-  const streakColor = pnl.currentStreakType === 'win' ? 'var(--color-green)' : pnl.currentStreakType === 'loss' ? 'var(--color-red)' : 'var(--text-dim)';
-  const streakLabel = pnl.currentStreakType === 'win' ? `▲${pnl.currentStreak}` : pnl.currentStreakType === 'loss' ? `▼${pnl.currentStreak}` : '—';
-
-  // Slippage quality: % of trades with real VWAP slippage
-  const slipBreakdown = pnl.slippageMethodBreakdown || {};
-  const totalSlip = (slipBreakdown.real || 0) + (slipBreakdown.fallback || 0);
-  const realSlipPct = totalSlip > 0 ? Math.round((slipBreakdown.real / totalSlip) * 100) : null;
-
-  // ── Capital Efficiency ─────────────────────────────────────────────────
-  // bestAskPrice: use lowest valid ask across all order books
-  const bestAskPrice = validBooks.length
-    ? validBooks.reduce((best, ob) => (!best || ob.ask < best) ? ob.ask : best, null)
-    : null;
-  // Capital desplegado: sum of BTC*price + USDT across all exchanges
+  const bestAskPrice = validBooks.length ? validBooks.reduce((best,ob)=>(!best||ob.ask<best)?ob.ask:best,null) : null;
   const capitalDeployed = (() => {
-    if (!wallets.BTC || !wallets.USDT || !bestAskPrice) return null;
-    const btcVal  = Object.values(wallets.BTC  || {}).reduce((s, v) => s + (v || 0), 0) * bestAskPrice;
-    const usdtVal = Object.values(wallets.USDT || {}).reduce((s, v) => s + (v || 0), 0);
-    return btcVal + usdtVal;
+    if (!wallets.BTC||!wallets.USDT||!bestAskPrice) return null;
+    const btcVal  = Object.values(wallets.BTC||{}).reduce((s,v)=>s+(v||0),0)*bestAskPrice;
+    const usdtVal = Object.values(wallets.USDT||{}).reduce((s,v)=>s+(v||0),0);
+    return btcVal+usdtVal;
   })();
-  const roi = capitalDeployed > 0 ? ((pnl.totalPnl || 0) / capitalDeployed) * 100 : null;
-  const unrealizedPnl = pnl.unrealizedPnl ?? 0;
-  const unrealizedColor = unrealizedPnl >= 0 ? 'var(--color-green)' : 'var(--color-red)';
+  const roi = capitalDeployed>0?((pnl.totalPnl||0)/capitalDeployed)*100:null;
+  const totalRejected = Object.values(rejectionCounts).reduce((s,v)=>s+v,0);
+
+  const TABS = [
+    { id:'bot',          label:'⍢ Bot en Vivo',         desc:'Oportunidades y motor de arbitraje en tiempo real' },
+    { id:'executive',    label:'▣ Executive Dashboard',  desc:'Resumen ejecutivo para evaluadores' },
+    { id:'intelligence', label:'◌ Intelligence',         desc:'Rankings, volatilidad, predicciones' },
+    { id:'lifecycle',    label:'▥ Lifecycle Analytics',  desc:'Ciclo de vida de oportunidades' },
+  ];
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16, padding:'0 2px' }}>
 
-      {/* ── HEADER ──────────────────────────────────────────────────────── */}
-      <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap', background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'14px 20px', boxShadow:'var(--shadow-card)' }}>
-
-        <button onClick={toggleBot} style={{ background:botOn?'linear-gradient(135deg,#FF8C42,#FF2D78)':'var(--bg-surface-2)', color:botOn?'#fff':'var(--text-muted)', border:'none', borderRadius:8, padding:'7px 16px', fontWeight:800, fontSize:13, cursor:'pointer', boxShadow:botOn?'0 2px 12px rgba(255,45,120,0.30)':'none', transition:'all 0.2s' }}>
-          {botOn ? '▶ BOT ON' : '◎ BOT OFF'}
-        </button>
-        {botOn && <span style={{ fontSize:11, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>↑ {uptime(data?.uptimeMs)}</span>}
-
-        <div style={{ width:1, height:32, background:'var(--border)' }} />
-
-        <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-          <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>P&L Realizado</span>
-          <span style={{ fontSize:22, fontWeight:900, color:pnlColor, fontFamily:'var(--font-mono)', lineHeight:1 }}>{(pnl.realizedPnl||pnl.totalPnl||0)>=0?'+':''}{fmtP(pnl.realizedPnl??pnl.totalPnl,4)}</span>
-        </div>
-
-        {[
-          { label:'Trades',    value: pnl.totalTrades||0 },
-          { label:'Win Rate',  value: `${pnl.winRate||0}%` },
-          { label:'Viables',   value: viableCount },
-          { label:'Drawdown',  value: pnl.maxDrawdown!=null ? `-${pnl.maxDrawdown?.toFixed(1)}%` : '—',
-            color: (pnl.maxDrawdown||0) > 5 ? 'var(--color-red)' : (pnl.maxDrawdown||0) > 2 ? 'var(--color-yellow)' : 'var(--color-green)' },
-          ...(dailyPnl !== null ? [{ label:'P&L Hoy', value: `${dailyPnl >= 0 ? '+' : ''}$${Math.abs(dailyPnl).toFixed(2)}`,
-            color: dailyLossBreached ? 'var(--color-red)' : dailyPnl >= 0 ? 'var(--color-green)' : 'var(--color-yellow)',
-            title: dailyLossBreached ? `STOP global activo: pérdida diaria alcanzó límite de $${Math.abs(dailyPnl).toFixed(2)}` : 'P&L acumulado hoy (UTC). Bot se detiene si supera -$500' }] : []),
-          { label:'Streak',    value: streakLabel, color: streakColor },
-          { label:'Avg Exec',  value: pnl.avgExecutionMs ? `${pnl.avgExecutionMs?.toFixed(0)}ms` : '—' },
-          ...(realSlipPct !== null ? [{ label:'VWAP Real', value:`${realSlipPct}%`, color: realSlipPct > 70 ? 'var(--color-green)' : realSlipPct > 30 ? 'var(--color-yellow)' : 'var(--color-red)' }] : []),
-        ].map(({label,value,color})=>(
-          <div key={label} style={{ display:'flex', flexDirection:'column', gap:2 }}>
-            <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>{label}</span>
-            <span style={{ fontSize:16, fontWeight:800, color:color||'var(--text)', fontFamily:'var(--font-mono)', lineHeight:1 }}>{value}</span>
-          </div>
+      {/* ── TAB BAR ──────────────────────────────────────────────────────── */}
+      <div style={{ display:'flex', gap:4, background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'6px 8px', flexWrap:'wrap' }}>
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} title={tab.desc} style={{
+            padding:'7px 16px', borderRadius:8, border:'none', cursor:'pointer', fontWeight:700, fontSize:12,
+            background: activeTab===tab.id ? 'linear-gradient(135deg,rgba(255,45,120,0.15),rgba(88,65,217,0.15))' : 'transparent',
+            color: activeTab===tab.id ? 'var(--text)' : 'var(--text-dim)',
+            borderBottom: activeTab===tab.id ? '2px solid #FF2D78' : '2px solid transparent',
+            transition:'all 0.15s',
+          }}>{tab.label}</button>
         ))}
 
-        <div style={{ width:1, height:32, background:'var(--border)' }} />
-
-        {/* ── Capital Efficiency Panel ── */}
-        {capitalDeployed != null && (
-          <>
-            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Capital</span>
-              <span style={{ fontSize:14, fontWeight:800, color:'var(--text)', fontFamily:'var(--font-mono)', lineHeight:1 }}>${fmt(capitalDeployed,0)}</span>
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>ROI</span>
-              <span style={{ fontSize:14, fontWeight:800, color:roi >= 0 ? 'var(--color-green)' : 'var(--color-red)', fontFamily:'var(--font-mono)', lineHeight:1 }}>
-                {roi != null ? `${roi >= 0 ? '+' : ''}${roi.toFixed(4)}%` : '—'}
+        {/* Live status pills — always visible */}
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ display:'flex', gap:5 }}>
+            {Object.entries(wsStatusMap).filter(([k])=>k!=='Coinbase').map(([ex,on])=>(
+              <span key={ex} style={{ display:'flex', alignItems:'center', gap:3, fontSize:10, fontWeight:700, color:on?'var(--color-green)':'var(--text-dim)' }}>
+                <span style={{ width:5, height:5, borderRadius:'50%', background:on?'var(--color-green)':'var(--text-dim)', animation:on?'pulseDot 1.5s infinite':'none' }}/>
+                {ex.slice(0,3)}
               </span>
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
-              <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Unrealized</span>
-              <span style={{ fontSize:14, fontWeight:800, color:unrealizedColor, fontFamily:'var(--font-mono)', lineHeight:1 }}>
-                {unrealizedPnl >= 0 ? '+' : ''}{fmtP(unrealizedPnl, 4)}
-              </span>
-            </div>
-          </>
-        )}
-
-        <div style={{ width:1, height:32, background:'var(--border)' }} />
-
-        <div style={{ display:'flex', flexDirection:'column', gap:4, minWidth:160 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Min Score</span>
-            <span style={{ fontSize:12, fontWeight:800, fontFamily:'var(--font-mono)', color:scoreColor(pendingScore) }}>{pendingScore}</span>
+            ))}
           </div>
-          <input type="range" min={0} max={80} step={5} value={pendingScore}
-            onChange={e => {
-              const val = Number(e.target.value); setPending(val);
-              clearTimeout(scoreTimeoutRef.current);
-              scoreTimeoutRef.current = setTimeout(() => applyScore(val), 180);
-            }}
-            style={{ width:'100%', accentColor:'#FF2D78', cursor:'pointer' }}
-          />
-          <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-dim)' }}>
-            <span>0 Permisivo</span><span>80 Estricto</span>
-          </div>
-        </div>
-
-        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-            <span style={{ fontSize:9, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.05em' }}>WebSockets</span>
-            <div style={{ display:'flex', gap:6 }}>
-              {['Binance','Kraken','Bybit','OKX'].map(ex => (
-                <span key={ex} style={{ display:'flex', alignItems:'center', gap:3, fontSize:10, fontWeight:700 }}>
-                  <span style={{ width:6, height:6, borderRadius:'50%', background:wsStatusMap[ex]?'var(--color-green)':'var(--text-dim)', animation:wsStatusMap[ex]?'pulseDot 1.5s ease-in-out infinite':'none' }}/>
-                  {ex.slice(0,3)}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, fontWeight:700 }}>
-            <span style={{ width:7, height:7, borderRadius:'50%', background:sseOk?'#0052FF':'var(--text-dim)', animation:sseOk?'pulseDot 1.5s ease-in-out infinite':'none' }}/>
+          <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, fontWeight:700 }}>
+            <span style={{ width:6, height:6, borderRadius:'50%', background:sseOk?'#0052FF':'var(--text-dim)', animation:sseOk?'pulseDot 1.5s infinite':'none' }}/>
             <span style={{ color:sseOk?'#0052FF':'var(--text-dim)' }}>{sseOk?`SSE${sseLatency?` ${sseLatency}ms`:''}` : 'Conectando…'}</span>
           </div>
-          {avgLatency!=null && <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:latColor(avgLatency) }}>avg {avgLatency}ms</span>}
-          <span style={{ fontSize:11, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>{data?.ts?ago(data.ts):'—'}</span>
         </div>
       </div>
 
-      {triangularSignal && <TriangularSignalBanner signal={triangularSignal} />}
-      {dailyLossBreached && (
-        <div style={{ background:'var(--color-red-dim)', border:'1px solid rgba(240,62,62,0.35)', borderRadius:'var(--radius)', padding:'10px 16px', display:'flex', alignItems:'center', gap:10, fontSize:12, marginBottom:0 }}>
-          <span style={{ fontSize:16 }}>🛑</span>
-          <div style={{ flex:1 }}>
-            <span style={{ fontWeight:800, color:'var(--color-red)' }}>Circuit Breaker Global — Bot Detenido</span>
-            <span style={{ color:'var(--text-muted)', marginLeft:8 }}>Pérdida diaria alcanzó el límite de -$500. No se ejecutarán más trades hasta el siguiente día UTC.</span>
+      {/* ── TABS CONTENT ─────────────────────────────────────────────────── */}
+      {activeTab==='executive' && <ExecutiveDashboard data={data} />}
+      {activeTab==='intelligence' && <IntelligencePanel data={data} opportunities={opportunities} />}
+      {activeTab==='lifecycle' && <LifecyclePanel data={data} />}
+
+      {activeTab==='bot' && (<>
+
+        {/* ── DAILY LOSS BREACHED ──────────────────────────────────────────── */}
+        {dailyLossBreached && (
+          <div style={{ background:'var(--color-red-dim)', border:'1px solid rgba(240,62,62,0.35)', borderRadius:'var(--radius)', padding:'10px 16px', display:'flex', alignItems:'center', gap:10 }}>
+            <span style={{ fontSize:16 }}>🛑</span>
+            <strong style={{ color:'var(--color-red)' }}>Circuit Breaker Global — Bot Detenido.</strong>
+            <span style={{ color:'var(--text-muted)', fontSize:12, marginLeft:4 }}>Pérdida diaria alcanzó -$500. P&L hoy: {dailyPnl!=null?`$${dailyPnl.toFixed(2)}`:'—'}</span>
           </div>
-          <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:'var(--color-red)', whiteSpace:'nowrap' }}>
-            P&L hoy: {dailyPnl != null ? `$${dailyPnl.toFixed(2)}` : '—'}
-          </span>
-        </div>
-      )}
+        )}
 
-      {/* ── GRID MEDIO ──────────────────────────────────────────────────── */}
-      <div style={{ display:'grid', gridTemplateColumns:'55fr 45fr', gap:16 }}>
-
-        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-
-          {/* Order Books */}
-          <Card>
-            <SectionTitle right={<span style={{ fontSize:10, color:anyWs?'var(--color-green)':'var(--text-dim)', fontWeight:700 }}><span className="pulse-dot" style={{ marginRight:4 }}/>{anyWs?'WS LIVE':'HTTP 1s'}</span>}>
-              Live Order Books <span style={{ fontSize:10, fontWeight:400, color:'var(--text-dim)' }}>({validBooks.length}/5 activos)</span>
-            </SectionTitle>
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                <thead><tr style={{ background:'var(--bg-surface-2)' }}>
-                  {['Exchange','Bid','Ask','Spread','Spread%','Latencia','Fuente','Status'].map(h=>(
-                    <th key={h} style={{ padding:'8px 10px', textAlign:'left', fontWeight:700, fontSize:10, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em', whiteSpace:'nowrap' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {orderBooks.length===0&&<tr><td colSpan={8} style={{ padding:20, textAlign:'center', color:'var(--text-dim)' }}>Conectando…</td></tr>}
-                  {orderBooks.map(ob=>(
-                    <tr key={ob.exchange} style={{ borderTop:'1px solid var(--border)', transition:'background 0.1s' }}
-                      onMouseEnter={e=>e.currentTarget.style.background='var(--bg-surface-2)'}
-                      onMouseLeave={e=>e.currentTarget.style.background=''}>
-                      <td style={{ padding:'10px 10px', fontWeight:700 }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                          <span style={{ width:8, height:8, borderRadius:'50%', background:EX_COLORS_DARK[ob.exchange]||'#999', border:ob.exchange==='OKX'?'1px solid #555':'none' }}/>
-                          {ob.exchange}
-                        </div>
-                      </td>
-                      <td style={{ padding:'10px 10px', fontFamily:'var(--font-mono)', fontWeight:700, color:ob.exchange===bestBidEx?'var(--color-green)':'var(--text)' }}>{ob.error?'—':`$${fmt(ob.bid,2)}`}</td>
-                      <td style={{ padding:'10px 10px', fontFamily:'var(--font-mono)', fontWeight:700, color:ob.exchange===bestAskEx?'var(--color-blue)':'var(--text)' }}>{ob.error?'—':`$${fmt(ob.ask,2)}`}</td>
-                      <td style={{ padding:'10px 10px', fontFamily:'var(--font-mono)', color:'var(--text-muted)' }}>{ob.error?'—':`$${fmt(ob.spread,2)}`}</td>
-                      <td style={{ padding:'10px 10px', fontFamily:'var(--font-mono)', color:'var(--text-muted)' }}>{ob.error?'—':`${ob.spreadPct}%`}</td>
-                      <td style={{ padding:'10px 10px', fontFamily:'var(--font-mono)', fontSize:11, color:latColor(ob.latencyMs||0) }}>{latLabel(ob.latencyMs||0)}</td>
-                      <td style={{ padding:'10px 10px' }}><WsBadge on={ob.source==='ws'}/></td>
-                      <td style={{ padding:'10px 10px' }}>{ob.error?<span style={{ color:'var(--color-red)', fontSize:10 }}>✗ {ob.error.slice(0,18)}</span>:<span style={{ color:'var(--color-green)', fontSize:10, fontWeight:700 }}>✓ OK</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* Opportunities */}
-          <Card>
-            <SectionTitle right={viableCount>0?<span style={{ color:'var(--color-green)', fontWeight:700, fontSize:10 }}>⚡ {viableCount} viable{viableCount!==1?'s':''} (score≥{minScore})</span>:<span style={{ fontSize:10, color:'var(--text-dim)' }}>Escaneando…</span>}>
-              Oportunidades detectadas
-            </SectionTitle>
-            <div style={{ padding:'12px', display:'flex', flexDirection:'column', gap:8 }}>
-              {opportunities.length===0&&<div style={{ padding:20, textAlign:'center', color:'var(--text-dim)' }}>Analizando mercados…</div>}
-              {opportunities.slice(0,8).map((op,i)=>(
-                <div key={op.id||i} style={{ padding:'11px 13px', background:op.viable?'var(--color-green-dim)':op.circuitBreaker?'var(--color-yellow-dim)':'var(--bg-surface-2)', border:`1px solid ${op.viable?'rgba(0,184,122,0.20)':op.circuitBreaker?'rgba(245,158,11,0.20)':'var(--border)'}`, borderRadius:'var(--radius)', display:'flex', flexDirection:'column', gap:6, opacity:op.viable&&op.score<minScore?0.5:1 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                    <StatusBadge {...op}/>
-                    {op.viable&&<ScoreBadge score={op.score}/>}
-                    {op.slippageMethod && <SlippageBadge method={op.slippageMethod}/>}
-                    {op.viable&&op.score<minScore&&<span style={{ fontSize:9, color:'var(--text-dim)', fontStyle:'italic' }}>bajo umbral</span>}
-                    <span style={{ fontSize:12, fontWeight:700 }}>
-                      <span style={{ color:EX_COLORS_DARK[op.buyExchange]||'#aaa' }}>COMPRAR</span> en {op.buyExchange} <span style={{ fontFamily:'var(--font-mono)' }}>${fmt(op.buyPrice)}</span>
-                      <span style={{ color:'var(--text-dim)', margin:'0 5px' }}>→</span>
-                      <span style={{ color:EX_COLORS_DARK[op.sellExchange]||'#aaa' }}>VENDER</span> en {op.sellExchange} <span style={{ fontFamily:'var(--font-mono)' }}>${fmt(op.sellPrice)}</span>
-                    </span>
-                    <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2 }}>
-                      <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, fontSize:12, color:op.netProfit>0?'var(--color-green)':'var(--color-red)' }}>
-                        {op.netProfit>0?'+':''}{fmtP(op.netProfit,4)} ({fmtPct(op.netProfitPct)})
-                      </span>
-                      {op.profitLow!=null&&op.viable&&(
-                        <span style={{ fontSize:9, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>
-                          95% CI [{fmtP(op.profitLow,3)}, {fmtP(op.profitHigh,3)}]
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:12, fontSize:10, color:'var(--text-dim)', flexWrap:'wrap', alignItems:'center' }}>
-                    <span>Gross: <span style={{ fontFamily:'var(--font-mono)', color:'var(--text-muted)' }}>${fmt(op.grossProfit,4)}</span></span>
-                    <span>Fees: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(op.totalFees||(op.buyFee||0)+(op.sellFee||0),4)}</span></span>
-                    <span>Slip: <span style={{ fontFamily:'var(--font-mono)' }}>{op.slippagePct?.toFixed(4)||'—'}%</span> <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)', marginLeft:2 }}>-${fmt(op.slippage||op.slippage,4)}</span></span>
-                    <span>Retiro: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(op.withdrawalFeeUSD,4)}</span></span>
-                    <span>Spread: <span style={{ fontFamily:'var(--font-mono)' }}>{op.spreadPct?.toFixed(3)||'—'}%</span></span>
-                    <span>Lat: <span style={{ fontFamily:'var(--font-mono)', color:latColor((op.buyLatency||0)+(op.sellLatency||0)) }}>{(op.buyLatency||0)+(op.sellLatency||0)}ms</span></span>
-                    {op.viable&&<ScoreBar score={op.score}/>}
-                    {!op.liquidityOk&&<span style={{ color:'var(--color-yellow)', fontWeight:700 }}>⚠ Liquidez</span>}
-                    {op.rejectionReason&&<span style={{ color:'var(--color-red)' }}>↳ {op.rejectionReason?.slice(0,60)}</span>}
-                  </div>
+        {/* ── HERO: OPORTUNIDADES DETECTADAS ──────────────────────────────── */}
+        <Card glow={viableCount > 0} style={{ overflow:'hidden' }}>
+          {/* Hero header */}
+          <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid var(--border)', background: viableCount>0 ? 'linear-gradient(135deg,rgba(0,184,122,0.05),transparent)' : 'transparent' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+              <div>
+                <h2 style={{ margin:0, fontSize:18, fontWeight:900, color:'var(--text)', letterSpacing:'-0.02em' }}>
+                  Oportunidades Detectadas
+                </h2>
+                <div style={{ fontSize:11, color:'var(--text-dim)', marginTop:2 }}>
+                  Bot analizando {validBooks.length} exchanges · Event-driven WebSocket · Latencia detección &lt; 30ms
                 </div>
-              ))}
+              </div>
+
+              {/* Big viable count */}
+              {viableCount > 0 ? (
+                <div style={{ background:'rgba(0,184,122,0.12)', border:'1px solid rgba(0,184,122,0.35)', borderRadius:12, padding:'8px 20px', textAlign:'center' }}>
+                  <div style={{ fontSize:28, fontWeight:900, color:'var(--color-green)', fontFamily:'var(--font-mono)', lineHeight:1 }}>{viableCount}</div>
+                  <div style={{ fontSize:10, color:'var(--color-green)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em' }}>viable{viableCount>1?'s':''}</div>
+                </div>
+              ) : (
+                <div style={{ background:'var(--bg-surface-2)', border:'1px solid var(--border)', borderRadius:12, padding:'8px 20px', textAlign:'center' }}>
+                  <div style={{ fontSize:28, fontWeight:900, color:'var(--text-dim)', fontFamily:'var(--font-mono)', lineHeight:1 }}>0</div>
+                  <div style={{ fontSize:10, color:'var(--text-dim)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em' }}>viables</div>
+                </div>
+              )}
+
+              {/* Scanning stats bar */}
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap', alignItems:'center' }}>
+                {[
+                  { label:'Pares analizados', value:opportunitiesScanned.toLocaleString(), color:'var(--text)' },
+                  { label:'Viables (sesión)', value:viableFound.toString(), color:'var(--color-green)' },
+                  { label:'Ejecutados',        value:(pnl.totalTrades||0).toString(), color:'var(--color-green)' },
+                  { label:'Cerca de viable',   value:nearViableCount.toString(), color:'var(--color-yellow)' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ textAlign:'center' }}>
+                    <div style={{ fontSize:17, fontWeight:900, fontFamily:'var(--font-mono)', color }}>{value}</div>
+                    <div style={{ fontSize:9, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:700 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Bot controls */}
+              <div style={{ marginLeft:'auto', display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+                <div style={{ display:'flex', flexDirection:'column', gap:2, minWidth:130 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--text-dim)', fontWeight:700 }}>
+                    <span>Score mínimo</span>
+                    <span style={{ color:scoreColor(pendingScore), fontFamily:'var(--font-mono)' }}>{pendingScore}</span>
+                  </div>
+                  <input type="range" min={0} max={80} step={5} value={pendingScore}
+                    onChange={e => {
+                      const val = Number(e.target.value); setPending(val);
+                      clearTimeout(scoreTimeoutRef.current);
+                      scoreTimeoutRef.current = setTimeout(() => applyScore(val), 180);
+                    }}
+                    style={{ width:'100%', accentColor:'#FF2D78', cursor:'pointer' }}
+                  />
+                </div>
+                <button onClick={toggleBot} style={{
+                  background: botOn ? 'linear-gradient(135deg,#FF8C42,#FF2D78)' : 'var(--bg-surface-2)',
+                  color: botOn ? '#fff' : 'var(--text-muted)',
+                  border: botOn ? 'none' : '1px solid var(--border)',
+                  borderRadius:8, padding:'8px 18px', fontWeight:800, fontSize:13, cursor:'pointer',
+                  boxShadow: botOn ? '0 2px 12px rgba(255,45,120,0.30)' : 'none',
+                  whiteSpace:'nowrap',
+                }}>
+                  {botOn ? '▶ ACTIVO' : '◎ INACTIVO'}
+                </button>
+                {botOn && <span style={{ fontSize:10, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>↑ {uptime(data?.uptimeMs)}</span>}
+              </div>
             </div>
-          </Card>
-        </div>
 
-        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-
-          {/* Equity Curve */}
-          <Card style={{ paddingBottom:12 }}>
-            <SectionTitle right={
-              equityCurve.length>0&&(
-                <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2 }}>
-                  <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:(equityCurve[equityCurve.length-1]?.pnl||0)>=0?'var(--color-green)':'var(--color-red)' }}>
-                    {(equityCurve[equityCurve.length-1]?.pnl||0)>=0?'+':''}${(equityCurve[equityCurve.length-1]?.pnl||0).toFixed(4)}
+            {/* Rejection breakdown — why nothing is viable */}
+            {totalRejected > 0 && viableCount === 0 && (
+              <div style={{ display:'flex', gap:10, marginTop:12, flexWrap:'wrap', padding:'8px 0 0' }}>
+                <span style={{ fontSize:10, color:'var(--text-dim)', fontWeight:700, alignSelf:'center' }}>Rechazados por:</span>
+                {rejectionCounts.fees_slippage > 0 && <span style={{ background:'rgba(240,62,62,0.08)', color:'var(--color-red)', fontSize:10, fontWeight:700, padding:'2px 10px', borderRadius:99, border:'1px solid rgba(240,62,62,0.2)' }}>Fees+Slip: {rejectionCounts.fees_slippage.toLocaleString()}</span>}
+                {rejectionCounts.circuit_breaker > 0 && <span style={{ background:'rgba(245,158,11,0.08)', color:'#F59E0B', fontSize:10, fontWeight:700, padding:'2px 10px', borderRadius:99, border:'1px solid rgba(245,158,11,0.2)' }}>Circuit Breaker: {rejectionCounts.circuit_breaker.toLocaleString()}</span>}
+                {rejectionCounts.liquidity > 0 && <span style={{ background:'rgba(245,158,11,0.08)', color:'#F59E0B', fontSize:10, fontWeight:700, padding:'2px 10px', borderRadius:99, border:'1px solid rgba(245,158,11,0.2)' }}>Liquidez: {rejectionCounts.liquidity.toLocaleString()}</span>}
+                {rejectionCounts.negative_spread > 0 && <span style={{ background:'var(--bg-surface-2)', color:'var(--text-dim)', fontSize:10, fontWeight:700, padding:'2px 10px', borderRadius:99, border:'1px solid var(--border)' }}>Spread−: {rejectionCounts.negative_spread.toLocaleString()}</span>}
+                {bestOpportunitySeen && (
+                  <span style={{ marginLeft:'auto', fontSize:11, fontFamily:'var(--font-mono)', color:bestOpportunitySeen.netProfit>0?'var(--color-green)':'var(--color-yellow)', fontWeight:700 }}
+                    title={`Mejor spread visto: ${bestOpportunitySeen.buyExchange}→${bestOpportunitySeen.sellExchange}`}>
+                    Mejor visto: {bestOpportunitySeen.netProfit>=0?'+':''}${bestOpportunitySeen.netProfit.toFixed(4)} ({bestOpportunitySeen.spreadPct}%)
                   </span>
-                  {pnl.maxDrawdown>0&&(
-                    <span style={{ fontSize:9, color:'var(--color-red)', fontFamily:'var(--font-mono)' }}>
-                      max DD -{pnl.maxDrawdown?.toFixed(2)}%
-                    </span>
-                  )}
-                </div>
-              )
-            }>
-              Equity Curve <span style={{ fontSize:10, fontWeight:400, color:'var(--text-dim)' }}>({equityCurve.length} trades)</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Opportunity list */}
+          <div style={{ padding:'12px', display:'flex', flexDirection:'column', gap:10 }}>
+            {opportunities.length === 0 ? (
+              <ScanningPulse opportunitiesScanned={opportunitiesScanned} nearViableCount={nearViableCount} bestOpportunitySeen={bestOpportunitySeen} />
+            ) : (
+              opportunities.slice(0, 10).map((op, i) => (
+                <OpportunityHero key={op.id||i} op={op} minScore={minScore} rank={i+1} />
+              ))
+            )}
+          </div>
+
+          {/* Triangular signal */}
+          {triangularSignal && (
+            <div style={{ margin:'0 12px 12px', background:'linear-gradient(135deg,rgba(88,65,217,0.08),rgba(88,65,217,0.04))', border:'1px solid rgba(88,65,217,0.25)', borderRadius:10, padding:'10px 16px', display:'flex', alignItems:'center', gap:12, fontSize:12 }}>
+              <span>🔗</span>
+              <div style={{ flex:1 }}>
+                <span style={{ fontWeight:800, color:'#5741D9' }}>Señal 3-Leg Cross-Exchange</span>
+                <span style={{ color:'var(--text-muted)', marginLeft:8 }}>{triangularSignal.path}</span>
+              </div>
+              <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, color:'#5741D9' }}>+{triangularSignal.netPct.toFixed(4)}% net</span>
+              <span style={{ fontSize:9, color:'#5741D9', background:'rgba(88,65,217,0.12)', padding:'2px 7px', borderRadius:4, fontWeight:700 }}>ℹ INFO</span>
+            </div>
+          )}
+        </Card>
+
+        {/* ── P&L + EQUITY STRIP ──────────────────────────────────────────── */}
+        <div style={{ display:'grid', gridTemplateColumns:'auto 1fr', gap:16 }}>
+
+          {/* P&L metrics */}
+          <Card style={{ padding:'16px 20px', display:'flex', gap:24, alignItems:'center', flexWrap:'wrap' }}>
+            <div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>Realized P&L</div>
+              <div style={{ fontSize:28, fontWeight:900, color:pnlColor, fontFamily:'var(--font-mono)', lineHeight:1 }}>
+                {(pnl.realizedPnl??pnl.totalPnl??0)>=0?'+':''}{fmtP(pnl.realizedPnl??pnl.totalPnl,4)}
+              </div>
+            </div>
+            {[
+              { label:'Operaciones',  value: pnl.totalTrades||0 },
+              { label:'% Ganadoras', value: `${pnl.winRate||0}%` },
+              { label:'Max DD',      value: pnl.maxDrawdown!=null?`-${pnl.maxDrawdown?.toFixed(1)}%`:'—', color:(pnl.maxDrawdown||0)>5?'var(--color-red)':(pnl.maxDrawdown||0)>2?'var(--color-yellow)':'var(--color-green)' },
+              ...(dailyPnl!==null?[{ label:'P&L Hoy', value:`${dailyPnl>=0?'+':''}$${Math.abs(dailyPnl).toFixed(2)}`, color:dailyLossBreached?'var(--color-red)':dailyPnl>=0?'var(--color-green)':'var(--color-yellow)' }]:[]),
+              ...(roi!=null?[{ label:'ROI', value:`${roi>=0?'+':''}${roi.toFixed(3)}%`, color:roi>=0?'var(--color-green)':'var(--color-red)' }]:[]),
+              { label:'Ejec. Media', value: pnl.avgExecutionMs?`${Math.round(pnl.avgExecutionMs)}ms`:'—' },
+            ].map(({ label, value, color }) => (
+              <div key={label}>
+                <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>{label}</div>
+                <div style={{ fontSize:18, fontWeight:800, color:color||'var(--text)', fontFamily:'var(--font-mono)', lineHeight:1 }}>{value}</div>
+              </div>
+            ))}
+            <span title="Wallets pre-fondeadas en 5 exchanges" style={{ background:'rgba(0,184,122,0.08)', color:'var(--color-green)', fontSize:10, fontWeight:700, padding:'4px 10px', borderRadius:99, border:'1px solid rgba(0,184,122,0.2)', cursor:'help', whiteSpace:'nowrap', alignSelf:'center' }}>
+              ⚡ Pre-funded Bilateral
+            </span>
+          </Card>
+
+          {/* Equity curve */}
+          <Card>
+            <SectionTitle
+              right={equityCurve.length>0 && (
+                <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, fontSize:12, color:(equityCurve[equityCurve.length-1]?.pnl||0)>=0?'var(--color-green)':'var(--color-red)' }}>
+                  {(equityCurve[equityCurve.length-1]?.pnl||0)>=0?'+':''}${(equityCurve[equityCurve.length-1]?.pnl||0).toFixed(4)}
+                </span>
+              )}
+            >
+              Curva de Equity <span style={{ fontSize:10, fontWeight:400, color:'var(--text-dim)' }}>({equityCurve.length} trades)</span>
             </SectionTitle>
-            <div style={{ padding:'12px 8px 0' }}>
-              {equityCurve.length<2?(
-                <div style={{ height:155, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)', fontSize:12 }}>Esperando trades…</div>
-              ):(
-                <ResponsiveContainer width="100%" height={155}>
+            <div style={{ padding:'8px 8px 4px' }}>
+              {equityCurve.length < 2 ? (
+                <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-dim)', fontSize:12 }}>Esperando operaciones…</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={100}>
                   <LineChart data={equityCurve} margin={{ top:4, right:12, left:0, bottom:0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
-                    <XAxis dataKey="label" tick={{ fontSize:8, fill:'var(--text-dim)' }} interval="preserveStartEnd"/>
-                    <YAxis tick={{ fontSize:9, fill:'var(--text-dim)' }} tickFormatter={v=>`$${v.toFixed(2)}`} width={54}/>
+                    <XAxis dataKey="label" tick={{ fontSize:7, fill:'var(--text-dim)' }} interval="preserveStartEnd"/>
+                    <YAxis tick={{ fontSize:8, fill:'var(--text-dim)' }} tickFormatter={v=>`$${v.toFixed(1)}`} width={44}/>
                     <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="4 2"/>
-                    <Tooltip contentStyle={{ background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[`$${Number(v).toFixed(4)}`, n==='pnl'?'P&L acum.':'Trade']}/>
+                    <Tooltip contentStyle={{ background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[`$${Number(v).toFixed(4)}`, n==='pnl'?'P&L Acum.':'Op']}/>
                     <Line type="monotone" dataKey="pnl" stroke="#FF2D78" strokeWidth={2} dot={{ r:2, fill:'#FF2D78' }} isAnimationActive={false}/>
                   </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
           </Card>
+        </div>
 
-          {/* Latency heatmap */}
+        {/* ── ORDER BOOKS + WALLETS ────────────────────────────────────────── */}
+        <div style={{ display:'grid', gridTemplateColumns:'55fr 45fr', gap:16 }}>
+          {/* Order Books */}
           <Card>
-            <SectionTitle>Latencia & Fuente</SectionTitle>
-            <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
-              {orderBooks.filter(ob=>!ob.error).map(ob=>{
-                const pct = ob.source==='ws'?100:Math.max(5,Math.min(100,100-(ob.latencyMs/20)));
-                return (
-                  <div key={ob.exchange} style={{ display:'flex', alignItems:'center', gap:10 }}>
-                    <div style={{ width:70, fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
-                      <span style={{ width:7, height:7, borderRadius:'50%', background:EX_COLORS_DARK[ob.exchange]||'#999', border:ob.exchange==='OKX'?'1px solid #555':'none' }}/>
-                      {ob.exchange.slice(0,7)}
-                    </div>
-                    <div style={{ flex:1, height:8, background:'var(--border)', borderRadius:4, overflow:'hidden' }}>
-                      <div style={{ width:`${pct}%`, height:'100%', background:latColor(ob.latencyMs||0), transition:'width 0.4s' }}/>
-                    </div>
-                    <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:latColor(ob.latencyMs||0), minWidth:36, textAlign:'right' }}>{latLabel(ob.latencyMs||0)}</span>
-                    <WsBadge on={ob.source==='ws'}/>
-                  </div>
-                );
-              })}
-              {orderBooks.filter(ob=>!ob.error).length===0&&<div style={{ fontSize:12, color:'var(--text-dim)', padding:'6px 0' }}>Conectando…</div>}
-            </div>
-          </Card>
-
-          {/* Wallets */}
-          <Card>
-            <SectionTitle right={
-              <button onClick={handleReset} disabled={resetting} style={{ background:confirmReset?'var(--color-red-dim)':'var(--bg-surface-2)', color:confirmReset?'var(--color-red)':'var(--text-muted)', border:`1px solid ${confirmReset?'rgba(240,62,62,0.25)':'var(--border)'}`, borderRadius:6, padding:'4px 10px', fontSize:11, fontWeight:700, cursor:'pointer', transition:'all 0.15s' }} onBlur={()=>setConfirm(false)}>
-                {confirmReset?'⚠ Confirmar':'↺ Reset'}
-              </button>
-            }>Wallets</SectionTitle>
+            <SectionTitle
+              sub="Precios bid/ask en tiempo real desde WebSocket feeds"
+              right={<span style={{ fontSize:10, color:anyWs?'var(--color-green)':'var(--text-dim)', fontWeight:700 }}>{anyWs?'⬤ WS EN VIVO':'○ HTTP'}</span>}
+            >
+              Order Books en Vivo <span style={{ fontSize:10, fontWeight:400, color:'var(--text-dim)' }}>({validBooks.length}/5)</span>
+            </SectionTitle>
             <div style={{ overflowX:'auto' }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead><tr style={{ background:'var(--bg-surface-2)' }}>
-                  {['Exchange','BTC','USDT'].map(h=><th key={h} style={{ padding:'7px 12px', textAlign:h==='Exchange'?'left':'right', fontWeight:700, fontSize:10, color:'var(--text-dim)', textTransform:'uppercase' }}>{h}</th>)}
+                  {['Exchange','Bid','Ask','Spread%','Latencia','Feed'].map(h=>(
+                    <th key={h} style={{ padding:'7px 10px', textAlign:'left', fontWeight:700, fontSize:9, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.06em', whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
                 </tr></thead>
                 <tbody>
-                  {ALL_EXCHANGES.map(ex=>(
-                    <tr key={ex} style={{ borderTop:'1px solid var(--border)' }}>
-                      <td style={{ padding:'9px 12px', fontWeight:700 }}><ExDot name={ex}/></td>
-                      <td style={{ padding:'9px 12px', textAlign:'right', fontFamily:'var(--font-mono)' }}>{fmt(wallets.BTC?.[ex],6)}</td>
-                      <td style={{ padding:'9px 12px', textAlign:'right', fontFamily:'var(--font-mono)' }}>{wallets.USDT?.[ex]!=null?`$${fmt(wallets.USDT[ex],2)}`:'—'}</td>
+                  {orderBooks.length===0 && <tr><td colSpan={6} style={{ padding:20, textAlign:'center', color:'var(--text-dim)' }}>Conectando…</td></tr>}
+                  {orderBooks.map(ob=>(
+                    <tr key={ob.exchange} style={{ borderTop:'1px solid var(--border)' }}>
+                      <td style={{ padding:'9px 10px', fontWeight:700 }}>
+                        <span style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <span style={{ width:7, height:7, borderRadius:'50%', background:EX_COLORS[ob.exchange]||'#999' }}/>
+                          {ob.exchange}
+                        </span>
+                      </td>
+                      <td style={{ padding:'9px 10px', fontFamily:'var(--font-mono)', fontWeight:700, color:ob.exchange===bestBidEx?'var(--color-green)':'var(--text)' }}>{ob.error?'—':`$${fmt(ob.bid,2)}`}</td>
+                      <td style={{ padding:'9px 10px', fontFamily:'var(--font-mono)', fontWeight:700, color:ob.exchange===bestAskEx?'#0052FF':'var(--text)' }}>{ob.error?'—':`$${fmt(ob.ask,2)}`}</td>
+                      <td style={{ padding:'9px 10px', fontFamily:'var(--font-mono)', color:'var(--text-muted)', fontSize:11 }}>{ob.error?'—':`${ob.spreadPct}%`}</td>
+                      <td style={{ padding:'9px 10px', fontFamily:'var(--font-mono)', fontSize:11, color:latColor(ob.latencyMs||0) }}>{latLabel(ob.latencyMs||0)}</td>
+                      <td style={{ padding:'9px 10px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                          <WsBadge on={ob.source==='ws'}/>
+                          {ob.error
+                            ? <span style={{ color:'var(--color-red)', fontSize:9 }}>✗</span>
+                            : <span style={{ color:'var(--color-green)', fontSize:9 }}>✓</span>
+                          }
+                          {feedFreshness[ob.exchange]?.stale && <span style={{ color:'#F59E0B', fontSize:9, fontWeight:700 }}>⚠</span>}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {(pnl.totalFees||0) > 0 && (
-              <div style={{ padding:'8px 14px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:8, fontSize:11, color:'var(--text-dim)' }}>
-                <span>Fees trading: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(pnl.totalFees,4)}</span></span>
-                {(pnl.totalWithdrawalFees||0)>0&&<span>Fees retiro: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(pnl.totalWithdrawalFees,4)}</span></span>}
-              </div>
-            )}
           </Card>
-        </div>
-      </div>
 
-      {/* ── HISTORIAL ───────────────────────────────────────────────────── */}
-      <Card>
-        <SectionTitle right={
-          <div style={{ display:'flex', gap:12, alignItems:'center' }}>
-            {pnl.avgNetProfitPct != null && pnl.totalTrades > 0 && (
-              <span style={{ fontSize:11, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>
-                avg/trade: <span style={{ color:(pnl.avgNetProfitPct||0)>=0?'var(--color-green)':'var(--color-red)', fontWeight:700 }}>{(pnl.avgNetProfitPct||0)>=0?'+':''}{(pnl.avgNetProfitPct||0).toFixed(4)}%</span>
-              </span>
-            )}
-            <span style={{ fontSize:11, color:'var(--text-dim)' }}>Últimas {history.length} ops</span>
+          {/* Wallets + latency */}
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            <Card>
+              <SectionTitle right={
+                <button onClick={handleReset} disabled={resetting}
+                  style={{ background:confirmReset?'var(--color-red-dim)':'var(--bg-surface-2)', color:confirmReset?'var(--color-red)':'var(--text-muted)', border:`1px solid ${confirmReset?'rgba(240,62,62,0.25)':'var(--border)'}`, borderRadius:6, padding:'4px 10px', fontSize:11, fontWeight:700, cursor:'pointer' }}
+                  onBlur={()=>setConfirm(false)}>
+                  {confirmReset?'⚠ Confirmar':'↺ Reiniciar'}
+                </button>
+              }>Carteras / Saldos</SectionTitle>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead><tr style={{ background:'var(--bg-surface-2)' }}>
+                    {['Exchange','BTC','USDT'].map(h=><th key={h} style={{ padding:'6px 12px', textAlign:h==='Exchange'?'left':'right', fontWeight:700, fontSize:9, color:'var(--text-dim)', textTransform:'uppercase' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {ALL_EXCHANGES.map(ex=>(
+                      <tr key={ex} style={{ borderTop:'1px solid var(--border)' }}>
+                        <td style={{ padding:'8px 12px', fontWeight:700 }}><ExDot name={ex}/></td>
+                        <td style={{ padding:'8px 12px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:11 }}>{fmt(wallets.BTC?.[ex],4)}</td>
+                        <td style={{ padding:'8px 12px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:11 }}>{wallets.USDT?.[ex]!=null?`$${fmt(wallets.USDT[ex],0)}`:'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* Latency heatmap */}
+            <Card>
+              <SectionTitle>Latencia por Exchange</SectionTitle>
+              <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:8 }}>
+                {orderBooks.filter(ob=>!ob.error).map(ob=>{
+                  const pct = ob.source==='ws'?100:Math.max(5,100-(ob.latencyMs/20));
+                  return (
+                    <div key={ob.exchange} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                      <span style={{ width:60, fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+                        <span style={{ width:6, height:6, borderRadius:'50%', background:EX_COLORS[ob.exchange]||'#999' }}/>
+                        {ob.exchange.slice(0,6)}
+                      </span>
+                      <div style={{ flex:1, height:7, background:'var(--border)', borderRadius:3, overflow:'hidden' }}>
+                        <div style={{ width:`${pct}%`, height:'100%', background:latColor(ob.latencyMs||0), transition:'width 0.4s' }}/>
+                      </div>
+                      <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:latColor(ob.latencyMs||0), minWidth:32, textAlign:'right' }}>{latLabel(ob.latencyMs||0)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
           </div>
-        }>
-          Historial de Trades
-        </SectionTitle>
-        <div style={{ overflowX:'auto' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-            <thead><tr style={{ background:'var(--bg-surface-2)' }}>
-              {['#','Hora','Buy','Buy $','Sell','Sell $','BTC','Fees','Retiro','Slip%','Slip Método','Score','Neto','Status'].map((h,i)=>(
-                <th key={i} style={{ padding:'8px 9px', textAlign:'left', fontWeight:700, fontSize:9, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap' }}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {history.length===0&&<tr><td colSpan={14} style={{ padding:20, textAlign:'center', color:'var(--text-dim)' }}>Sin trades. Activa el bot.</td></tr>}
-              {history.map((t,i)=>(
-                <tr key={t.id||i} style={{ borderTop:'1px solid var(--border)', transition:'background 0.1s' }} onMouseEnter={e=>e.currentTarget.style.background='var(--bg-surface-2)'} onMouseLeave={e=>e.currentTarget.style.background=''}>
-                  <td style={{ padding:'7px 9px', color:'var(--text-dim)', fontWeight:600 }}>{i+1}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', color:'var(--text-muted)', whiteSpace:'nowrap' }}>{t.ts?new Date(t.ts).toLocaleTimeString('es-MX',{hour12:false}):'—'}</td>
-                  <td style={{ padding:'7px 9px', fontWeight:700 }}><ExDot name={t.buyExchange}/></td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>${fmt(t.buyPrice)}</td>
-                  <td style={{ padding:'7px 9px', fontWeight:700 }}><ExDot name={t.sellExchange}/></td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>${fmt(t.sellPrice)}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>{fmt(t.amount,4)}{t.partialFill&&<span style={{ marginLeft:3, fontSize:8, color:'var(--color-yellow)', fontWeight:700 }}>P</span>}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(t.totalFees||(t.buyFee||0)+(t.sellFee||0),4)}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', color:'var(--color-red)', fontSize:10 }}>{t.withdrawalFees?`-$${fmt(t.withdrawalFees,2)}`:'—'}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-dim)' }}>{t.slippagePct!=null?`${Number(t.slippagePct).toFixed(4)}%`:'—'}</td>
-                  <td style={{ padding:'7px 9px' }}>{t.slippageMethod&&<SlippageBadge method={t.slippageMethod}/>}</td>
-                  <td style={{ padding:'7px 9px' }}>{t.score!=null&&<span style={{ background:scoreBg(t.score), color:scoreColor(t.score), fontWeight:800, fontSize:9, padding:'1px 5px', borderRadius:4, fontFamily:'var(--font-mono)' }}>{t.score}</span>}</td>
-                  <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', fontWeight:800, color:(t.netProfit||0)>=0?'var(--color-green)':'var(--color-red)' }}>{(t.netProfit||0)>=0?'+':''}{fmtP(t.netProfit,4)}</td>
-                  <td style={{ padding:'7px 9px' }}><span style={{ background:t.status==='profit'?'var(--color-green-dim)':'var(--color-red-dim)', color:t.status==='profit'?'var(--color-green)':'var(--color-red)', fontWeight:700, fontSize:9, padding:'2px 6px', borderRadius:99 }}>{t.status==='profit'?'▲ WIN':'▼ LOSS'}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
-      </Card>
 
-      <style>{`
-        @keyframes pulse-bg { 0%{opacity:0.7}50%{opacity:1}100%{opacity:0.7} }
-        .pulse-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--color-green); animation:pulseDot 1.5s ease-in-out infinite; }
-        @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
-      `}</style>
+        {/* ── TRADE HISTORY ────────────────────────────────────────────────── */}
+        <Card>
+          <SectionTitle right={
+            <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+              {pnl.avgNetProfitPct != null && pnl.totalTrades > 0 && (
+                <span style={{ fontSize:11, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>
+                  media/op: <span style={{ color:(pnl.avgNetProfitPct||0)>=0?'var(--color-green)':'var(--color-red)', fontWeight:700 }}>
+                    {(pnl.avgNetProfitPct||0)>=0?'+':''}{(pnl.avgNetProfitPct||0).toFixed(4)}%
+                  </span>
+                </span>
+              )}
+              <span style={{ fontSize:11, color:'var(--text-dim)' }}>Últimas {history.length} ops</span>
+            </div>
+          }>Historial de Operaciones</SectionTitle>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+              <thead><tr style={{ background:'var(--bg-surface-2)' }}>
+                {['#','Hora','Compra en','Precio compra','Vende en','Precio venta','BTC','Fees','Slip','Score','Neto','Estado'].map((h,i)=>(
+                  <th key={i} style={{ padding:'7px 9px', textAlign:'left', fontWeight:700, fontSize:9, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap' }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {history.length===0 && (
+                  <tr><td colSpan={12} style={{ padding:24, textAlign:'center' }}>
+                    <div style={{ color:'var(--text-dim)', fontSize:13 }}>
+                      Bot activo — ejecutará cuando el spread neto supere el mínimo requerido.
+                      {opportunitiesScanned>0 && ` ${opportunitiesScanned.toLocaleString()} pares analizados hasta ahora.`}
+                    </div>
+                  </td></tr>
+                )}
+                {history.map((t,i)=>(
+                  <tr key={t.id||i} style={{ borderTop:'1px solid var(--border)', background: t.synthetic?'rgba(255,200,0,0.03)':'' }}
+                    onMouseEnter={e=>e.currentTarget.style.background='var(--bg-surface-2)'}
+                    onMouseLeave={e=>e.currentTarget.style.background=t.synthetic?'rgba(255,200,0,0.03)':''}>
+                    <td style={{ padding:'7px 9px', color:'var(--text-dim)', fontWeight:600 }}>
+                      {i+1}{t.synthetic&&<span style={{ marginLeft:3, fontSize:8, color:'#F59E0B', fontWeight:800 }}>DEMO</span>}
+                    </td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', color:'var(--text-muted)', whiteSpace:'nowrap' }}>{t.ts?new Date(t.ts).toLocaleTimeString('en-US',{hour12:false}):'—'}</td>
+                    <td style={{ padding:'7px 9px', fontWeight:700 }}><ExDot name={t.buyExchange}/></td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>${fmt(t.buyPrice)}</td>
+                    <td style={{ padding:'7px 9px', fontWeight:700 }}><ExDot name={t.sellExchange}/></td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>${fmt(t.sellPrice)}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)' }}>{fmt(t.amount,4)}{t.partialFill&&<span style={{ marginLeft:3, fontSize:8, color:'var(--color-yellow)', fontWeight:700 }}>P</span>}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(t.totalFees||(t.buyFee||0)+(t.sellFee||0),4)}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-dim)' }}>{t.slippagePct!=null?`${Number(t.slippagePct).toFixed(3)}%`:'—'}</td>
+                    <td style={{ padding:'7px 9px' }}>{t.score!=null&&<span style={{ background:`${scoreColor(t.score)}20`, color:scoreColor(t.score), fontWeight:800, fontSize:9, padding:'1px 6px', borderRadius:4, fontFamily:'var(--font-mono)' }}>{t.score}</span>}</td>
+                    <td style={{ padding:'7px 9px', fontFamily:'var(--font-mono)', fontWeight:800, color:(t.netProfit||0)>=0?'var(--color-green)':'var(--color-red)' }}>{(t.netProfit||0)>=0?'+':''}{fmtP(t.netProfit,4)}</td>
+                    <td style={{ padding:'7px 9px' }}><span style={{ background:t.status==='profit'?'var(--color-green-dim)':'var(--color-red-dim)', color:t.status==='profit'?'var(--color-green)':'var(--color-red)', fontWeight:700, fontSize:9, padding:'2px 6px', borderRadius:99 }}>{t.status==='profit'?'▲ GANADA':'▼ PERDIDA'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <style>{`
+          @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+        `}</style>
+      </>)}
     </div>
   );
 }

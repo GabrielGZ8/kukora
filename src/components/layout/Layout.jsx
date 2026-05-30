@@ -6,6 +6,26 @@ import { useOnboarding } from '../../hooks/useOnboarding';
 import { TooltipHint } from '../common/TooltipHint';
 import { useAlertMonitor } from '../../hooks/useAlertMonitor';
 
+// ─── Module-level market trend cache (avoids 429 on every remount) ────────
+const _mktCache = { trend: 'neutral', ts: 0 };
+const MKT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+async function fetchMarketTrend() {
+  const now = Date.now();
+  if (_mktCache.ts && now - _mktCache.ts < MKT_CACHE_TTL) return _mktCache.trend;
+  try {
+    const r = await fetch('/api/crypto/markets?limit=20');
+    if (!r.ok) return _mktCache.trend; // keep last known on error
+    const d = await r.json();
+    const coins = d?.data?.coins || d?.coins || [];
+    if (!coins.length) return _mktCache.trend;
+    const avg = coins.reduce((a, c) => a + (c.price_change_percentage_24h || 0), 0) / coins.length;
+    _mktCache.trend = avg > 1.5 ? 'bullish' : avg < -1.5 ? 'bearish' : 'neutral';
+    _mktCache.ts = now;
+  } catch {}
+  return _mktCache.trend;
+}
+
+
 
 // ─── Nav SVG Icons ───────────────────────────────────────────────────────
 const NavIcons = {
@@ -240,16 +260,7 @@ export default function Layout() {
   // Detect market trend for bird animation
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/crypto/markets?limit=20')
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(d => {
-        if (cancelled) return;
-        const coins = d?.data?.coins || d?.coins || [];
-        if (!coins.length) return;
-        const avg = coins.reduce((a, c) => a + (c.price_change_percentage_24h || 0), 0) / coins.length;
-        setMkt(avg > 1.5 ? 'bullish' : avg < -1.5 ? 'bearish' : 'neutral');
-      })
-      .catch(() => {}); // silently keep 'neutral' on any error
+    fetchMarketTrend().then(trend => { if (!cancelled) setMkt(trend); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 

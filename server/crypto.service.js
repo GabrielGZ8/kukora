@@ -41,7 +41,7 @@ const processQueue = async () => {
   while (_queue.length) {
     const { fn, resolve, reject } = _queue.shift();
     try { resolve(await fn()); } catch (e) { reject(e); }
-    if (_queue.length) await new Promise(r => setTimeout(r, 1100)); // ~55 req/min, safely under free-tier 100/min
+    if (_queue.length) await new Promise(r => setTimeout(r, 2500)); // ~24 req/min // ~30 req/min, well under free-tier 50/min
   }
   _running = false;
 };
@@ -50,11 +50,21 @@ const processQueue = async () => {
 const BASE = 'https://api.coingecko.com/api/v3';
 const cache = new Map();
 
-const get = async (url, ttl = 30_000) => {
+const get = async (url, ttl = 60_000) => {
   const hit = cache.get(url);
   if (hit && Date.now() - hit.ts < ttl) return hit.data;
 
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (res.status === 429) {
+    // Rate limited — always serve stale cache if available (extend TTL by 10min)
+    if (hit) {
+      hit.ts = Date.now(); // reset TTL so we don't hammer again
+      console.warn('[CoinGecko] 429 — serving stale cache');
+      return hit.data;
+    }
+    // No cache at all — return empty placeholder so UI doesn't crash
+    throw new Error('CoinGecko 429: rate limited, no cached data');
+  }
   if (!res.ok) throw new Error(`CoinGecko ${res.status}: ${url}`);
   const data = await res.json();
   cache.set(url, { data, ts: Date.now() });
@@ -91,7 +101,7 @@ const computeMetrics = (coins) => {
 };
 
 // ── Exports ───────────────────────────────────────────────────────────────
-const getMarkets = (limit = 50) => cached(`markets_${limit}`, 300_000, async () => {
+const getMarkets = (limit = 50) => cached(`markets_${limit}`, 600_000, async () => {
   const coins = await retry(() => enqueue(() => get(
     `${BASE}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${limit}&page=1&sparkline=true&price_change_percentage=1h,24h,7d`
     , 180_000
@@ -99,13 +109,13 @@ const getMarkets = (limit = 50) => cached(`markets_${limit}`, 300_000, async () 
   return computeMetrics(coins);
 });
 
-const getGlobal = () => cached('global', 600_000, () =>
+const getGlobal = () => cached('global', 900_000, () =>
   retry(() => enqueue(() => get(`${BASE}/global`, 300_000).then(r => r.data))));
 
-const getTrending = () => cached('trending', 600_000, () =>
+const getTrending = () => cached('trending', 900_000, () =>
   retry(() => enqueue(() => get(`${BASE}/search/trending`, 600_000))));
 
-const getCoinDetail = (id) => cached(`coin_${id}`, 120_000, () =>
+const getCoinDetail = (id) => cached(`coin_${id}`, 300_000, () =>
   retry(() => enqueue(() => get(`${BASE}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false`, 120_000))));
 
 const getOHLC = (id, days = 7) => cached(`ohlc_${id}_${days}`, 600_000, () =>

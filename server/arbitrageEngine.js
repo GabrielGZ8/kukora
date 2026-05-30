@@ -341,6 +341,7 @@ function detectOpportunities(orderBooks, tradeAmount) {
         evalMs:         pairEvalMs,
         feeMode:        USE_MAKER_FEES ? 'maker' : 'taker',
         tradeAmount:    amount,
+        detectedAt:     Date.now(),    // epoch ms — for opportunity age display in UI
         ts:             new Date().toISOString(),
       };
 

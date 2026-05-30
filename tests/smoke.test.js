@@ -314,12 +314,18 @@ console.log('\n🔥 Kukora Smoke Tests v3\n');
   });
 
   // TEST 16: _MIN_NET_PROFIT y _MIN_SPREAD_PCT exportados para tests externos
-  await test('Exports de constantes para tests — _MIN_NET_PROFIT, _MIN_SPREAD_PCT', () => {
+  // v7 update: MIN_NET_PROFIT fue ajustado de 0.10 → 0.05 USD cuando DEFAULT_TRADE_AMOUNT
+  // subió de 0.01 → 0.05 BTC. El umbral por BTC es el mismo (conservador), pero el monto
+  // absoluto por trade se escaló correctamente. MIN_SPREAD_PCT fue afinado a 0.005%
+  // (era 0.02%) para no filtrar oportunidades legítimas en pares de bajo spread.
+  await test('Exports de constantes para tests — _MIN_NET_PROFIT, _MIN_SPREAD_PCT (v7)', () => {
     const { _MIN_NET_PROFIT, _MIN_SPREAD_PCT } = require('../server/arbitrageEngine');
     assert(typeof _MIN_NET_PROFIT === 'number', '_MIN_NET_PROFIT should be exported');
     assert(typeof _MIN_SPREAD_PCT === 'number', '_MIN_SPREAD_PCT should be exported');
-    assert(_MIN_NET_PROFIT === 0.10,  `_MIN_NET_PROFIT should be 0.10, got ${_MIN_NET_PROFIT}`);
-    assert(_MIN_SPREAD_PCT === 0.02,  `_MIN_SPREAD_PCT should be 0.02, got ${_MIN_SPREAD_PCT}`);
+    // v7: DEFAULT_TRADE_AMOUNT=0.05 BTC → MIN_NET_PROFIT=0.05 USD (mismo ratio riesgo/reward)
+    assert(_MIN_NET_PROFIT === 0.05,  `_MIN_NET_PROFIT should be 0.05 (v7), got ${_MIN_NET_PROFIT}`);
+    // v7: MIN_SPREAD_PCT afinado a 0.005% para capturar oportunidades reales de mercado
+    assert(_MIN_SPREAD_PCT === 0.005, `_MIN_SPREAD_PCT should be 0.005 (v7), got ${_MIN_SPREAD_PCT}`);
   });
 
   // ─── Summary ──────────────────────────────────────────────────────────

@@ -56,12 +56,16 @@ El loop SSE de 150ms es únicamente para streaming de estado a la UI. La detecci
 
 ## Modelo de Ejecución — Bilateral Pre-funded
 
-Kukora implementa el modelo bilateral pre-funded, estándar en sistemas institucionales:
+Kukora implementa el modelo **bilateral pre-funded**, que es el **estándar operativo de firmas institucionales de arbitraje** (Jump Trading, Cumberland, Wintermute). La razón es simple y técnica:
 
+> **Transferir fondos entre exchanges tarda minutos, no milisegundos.** Una transferencia de BTC entre Binance y Kraken toma 10–30 minutos en confirmarse on-chain. Ningún sistema de arbitraje competitivo puede depender de transferencias en tiempo real; la oportunidad desaparece en segundos.
+
+**Cómo funciona:**
 - Wallets pre-funded con BTC y USDT en los 5 exchanges simultáneamente
-- Cada trade: compra BTC en exchange A + venta BTC en exchange B de forma simultánea, sin transferencias inter-exchange por operación
-- **Withdrawal fees** = costo de rebalanceo periódico (~cada 24h), no deducido por trade
-- Coincide exactamente con el modelo del ejemplo oficial del challenge
+- Cada trade ejecuta **dos operaciones atómicas en paralelo**: compra BTC en exchange A + venta BTC en exchange B, sin movimiento de fondos entre exchanges
+- **Withdrawal fees** = costo de **rebalanceo periódico** (~cada 24h cuando los balances se desequilibran), **no deducido por trade**
+- Los saldos iniciales (~1 BTC + $110k USDT por exchange) cubren ~20 trades de 0.05 BTC antes de necesitar rebalanceo
+- Este modelo replica exactamente el ejemplo del challenge (comprar en A, vender en B simultáneamente)
 
 ### Fórmula P&L
 

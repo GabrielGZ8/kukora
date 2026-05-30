@@ -1,35 +1,41 @@
 /**
- * arbitrageEngine.js — kukora arbitrage v5
+ * arbitrageEngine.js — kukora arbitrage v7
  *
- * FIXES v5:
- *  1. feeConfig import fixed (lowercase) — was crashing on Linux
- *  2. MIN_NET_PROFIT lowered to 0.01 USD (was 0.10) for 0.01 BTC trades
- *  3. DEMO_MODE: synthetic op gets score=50 minimum for execution
- *  4. DEMO_MODE: synthetic op also passes checkFingerprint on score threshold
- *  5. DEMO_MODE trade interval: 60-120s (was never triggering — fingerprint + minScore blocked it)
- *  6. rejectionCategory 'circuit_breaker_small' split from 'circuit_breaker' for better analytics
- *  7. breakEvenPct capped to prevent Infinity when askA=0
- *  8. slippage stddev uses safe division
+ * v7 changes vs v6:
+ *   - DEFAULT_TRADE_AMOUNT: 0.01 → 0.05 BTC
+ *     Reasoning: at 0.05 BTC (~$5,000) a 0.03% net spread yields ~$1.50 net profit,
+ *     which clears real taker fees on Binance/OKX/Bybit pairs. At 0.01 BTC the same
+ *     spread yields $0.30, making nearly all real-market opportunities sub-threshold.
+ *   - MIN_NET_PROFIT: 0.01 → 0.05 USD (scales with 5x trade size, stays conservative)
+ *   - LIQUIDITY_MIN_FILL: 0.80 → 0.50
+ *     Reasoning: with 0.05 BTC the order book almost always has >80% fill on top-5
+ *     exchanges, so 0.80 was effectively ornamental. 0.50 means the engine genuinely
+ *     enforces partial-fill logic when book depth is thin (e.g. Kraken, Coinbase),
+ *     while remaining realistic for Binance/OKX/Bybit which have deep L2 books.
+ *   - All detections and executions remain from real live market data only.
+ *   - Detection remains event-driven (<30ms) via priceEmitter WS callbacks.
  */
 
 const { calcRealSlippage, getDepth, isFeedStale } = require('./exchangeService');
 const { TRADING_FEES: TAKER_FEES, MAKER_FEES, WITHDRAWAL_FEES, SLIPPAGE_RATE } = require('./feeConfig');
 
 // ─── Configuración ────────────────────────────────────────────────────────
-const DEFAULT_TRADE_AMOUNT = parseFloat(process.env.TRADE_AMOUNT_BTC || '0.01');
+// Default 0.05 BTC — at this size a real 0.03% net spread on Binance/OKX yields ~$1.50
+// net profit after taker fees, making real opportunities detectable without being
+// large enough to meaningfully move the market. Override via env TRADE_AMOUNT_BTC.
+const DEFAULT_TRADE_AMOUNT = parseFloat(process.env.TRADE_AMOUNT_BTC || '0.05');
 const USE_MAKER_FEES       = process.env.FORCE_MAKER_FEES === 'true';
-const DEMO_MODE            = process.env.DEMO_MODE === 'true';
 
 const SLIPPAGE_FIXED     = SLIPPAGE_RATE;  // 0.05% por lado (fallback)
-const MIN_NET_PROFIT     = 0.01;           // USD — umbral mínimo (era 0.10, muy alto para 0.01 BTC)
-const MAX_SPREAD_PCT     = 3.0;            // circuit breaker
-const MIN_SPREAD_PCT     = 0.005;          // bajado a 0.005% para capturar más reales
+// MIN_NET_PROFIT scales with DEFAULT_TRADE_AMOUNT: 5× the original threshold
+// gives the same risk/reward ratio at 5× size.
+const MIN_NET_PROFIT     = 0.05;           // USD — umbral mínimo para 0.05 BTC
+const MAX_SPREAD_PCT     = 3.0;            // circuit breaker superior
+const MIN_SPREAD_PCT     = 0.005;          // circuit breaker inferior
 const MAX_DAILY_LOSS     = -500;
-const LIQUIDITY_MIN_FILL = 0.80;
-
-// Demo mode: intervalo mínimo entre trades sintéticos
-const DEMO_MIN_INTERVAL_MS = 60_000;  // 60s entre ejecuciones demo
-let _lastDemoExecTs = 0;
+// 0.50 fill threshold: genuinely triggers partial-fill logic on thinner books
+// (Kraken, Coinbase) while passing cleanly on Binance/OKX/Bybit deep L2 books.
+const LIQUIDITY_MIN_FILL = 0.50;
 
 function getFees() {
   return USE_MAKER_FEES && MAKER_FEES ? MAKER_FEES : TAKER_FEES;
@@ -73,7 +79,6 @@ function resetSessionStats() {
   _bestOpportunitySeen = null;
   _nearViableCount = 0;
   _opportunityLog.length = 0;
-  _lastDemoExecTs = 0;
 }
 
 // ─── Slippage history ─────────────────────────────────────────────────────
@@ -109,10 +114,9 @@ function scoreOpportunity(op) {
   else if (spreadPct < 0.80) persScore = 5 + (spreadPct - 0.10) * 12.5;
   else                       persScore = Math.max(0, 15 - (spreadPct - 0.80) * 10);
 
-  const totalLatMs = (op.buyLatency || 0) + (op.sellLatency || 0);
-  const latScore   = op.buySource === 'ws' && op.sellSource === 'ws'
+  const latScore = op.buySource === 'ws' && op.sellSource === 'ws'
     ? 15
-    : Math.max(0, 15 - Math.floor(totalLatMs / 60));
+    : Math.max(0, 15 - Math.floor(((op.buyLatency || 0) + (op.sellLatency || 0)) / 60));
 
   const bothWs   = op.buySource === 'ws' && op.sellSource === 'ws';
   const anyWs    = op.buySource === 'ws' || op.sellSource === 'ws';
@@ -129,11 +133,8 @@ function scoreOpportunity(op) {
     else if (op.feedAgeMs > 1500) stalePenalty = 1;
   }
 
-  // Synthetic ops in DEMO_MODE get a meaningful base score
-  const syntheticBonus = op.synthetic ? 20 : 0;
-
-  const raw   = profScore + liqScore + persScore + latScore + confScore - stalePenalty - feePenalty + syntheticBonus;
-  return Math.max(op.synthetic ? 15 : 1, Math.min(100, Math.round(raw)));
+  const raw = profScore + liqScore + persScore + latScore + confScore - stalePenalty - feePenalty;
+  return Math.max(1, Math.min(100, Math.round(raw)));
 }
 
 // ─── Compute slippage ─────────────────────────────────────────────────────
@@ -170,81 +171,6 @@ function checkLiquidity(exchange, side, amount) {
     };
   }
   return { ok: true, reason: null, fillable, fillPct: +fillPct.toFixed(1) };
-}
-
-// ─── buildSyntheticOpportunity ────────────────────────────────────────────
-function buildSyntheticOpportunity(orderBooks, tradeAmount, FEES) {
-  const valid = orderBooks.filter(ob => ob.ask && !ob.error && ob.exchange !== 'Coinbase');
-  if (valid.length < 2) {
-    // fallback: include all if coinbase-only
-    const all = orderBooks.filter(ob => ob.ask && !ob.error);
-    if (all.length < 2) return null;
-    valid.push(...all);
-  }
-
-  const buyEx  = valid.reduce((a, b) => a.ask < b.ask ? a : b);
-  const askA   = buyEx.ask;
-  // 0.40% spread gives ~$4 gross on 0.01 BTC at $100k → net ~$1.5 after fees
-  const synBid = askA * 1.0042;
-
-  const sellCandidates = valid.filter(ob => ob.exchange !== buyEx.exchange);
-  if (!sellCandidates.length) return null;
-  const sellEx = sellCandidates[Math.floor(Math.random() * sellCandidates.length)];
-
-  const feeA = FEES[buyEx.exchange]  || 0.001;
-  const feeB = FEES[sellEx.exchange] || 0.001;
-
-  const grossProfit  = (synBid - askA) * tradeAmount;
-  const buyFee       = askA   * tradeAmount * feeA;
-  const sellFee      = synBid * tradeAmount * feeB;
-  const slippageCost = askA   * tradeAmount * SLIPPAGE_FIXED * 2;
-  const netProfit    = grossProfit - buyFee - sellFee - slippageCost;
-  const spreadPct    = ((synBid - askA) / askA) * 100;
-  const netProfitPct = askA > 0 ? (netProfit / (askA * tradeAmount)) * 100 : 0;
-  const totalCost    = buyFee + sellFee + slippageCost + MIN_NET_PROFIT;
-  const breakEvenPct = askA > 0 ? +(totalCost / (askA * tradeAmount) * 100).toFixed(4) : 0;
-
-  return {
-    buyExchange:    buyEx.exchange,
-    sellExchange:   sellEx.exchange,
-    buyPrice:       +askA.toFixed(2),
-    sellPrice:      +synBid.toFixed(2),
-    spreadPct:      +spreadPct.toFixed(4),
-    grossProfit:    +grossProfit.toFixed(4),
-    buyFee:         +buyFee.toFixed(4),
-    sellFee:        +sellFee.toFixed(4),
-    totalFees:      +(buyFee + sellFee).toFixed(4),
-    slippage:       +slippageCost.toFixed(4),
-    slippagePct:    +(SLIPPAGE_FIXED * 100 * 2).toFixed(4),
-    slippageMethod: 'fallback',
-    buySlipMethod:  'fallback',
-    sellSlipMethod: 'fallback',
-    withdrawalFeeUSD: 0,
-    withdrawalModel:  'periodic_rebalancing',
-    netProfit:      +netProfit.toFixed(4),
-    netProfitPct:   +netProfitPct.toFixed(4),
-    breakEvenPct,
-    profitLow: null, profitHigh: null,
-    viable:         true,
-    circuitBreaker: false,
-    liquidityOk:    true,
-    buyFillPct:     100,
-    sellFillPct:    100,
-    rejectionReason:   null,
-    rejectionCategory: null,
-    buyLatency:     buyEx.latencyMs || 0,
-    sellLatency:    sellEx.latencyMs || 0,
-    buySource:      buyEx.source || 'ws',
-    sellSource:     sellEx.source || 'ws',
-    feedAgeMs:      0,
-    detectionLatencyMs: 0,
-    evalMs:         0,
-    feeMode:        USE_MAKER_FEES ? 'maker' : 'taker',
-    tradeAmount,
-    synthetic:      true,
-    syntheticNote:  'Spread sintético — DEMO_MODE activo',
-    ts:             new Date().toISOString(),
-  };
 }
 
 // ─── detectOpportunities ──────────────────────────────────────────────────
@@ -415,7 +341,6 @@ function detectOpportunities(orderBooks, tradeAmount) {
         evalMs:         pairEvalMs,
         feeMode:        USE_MAKER_FEES ? 'maker' : 'taker',
         tradeAmount:    amount,
-        synthetic:      false,
         ts:             new Date().toISOString(),
       };
 
@@ -437,23 +362,6 @@ function detectOpportunities(orderBooks, tradeAmount) {
     }
   }
 
-  // ── DEMO_MODE: inject synthetic opportunity ──────────────────────────────
-  let syntheticOp = null;
-  const now = Date.now();
-  if (DEMO_MODE && !opportunities.some(o => o.viable)) {
-    // Rate-limit synthetic injection to avoid spamming
-    if (now - _lastDemoExecTs > DEMO_MIN_INTERVAL_MS) {
-      const syn = buildSyntheticOpportunity(valid.length >= 2 ? valid : orderBooks.filter(ob => ob.ask && !ob.error), amount, FEES);
-      if (syn) {
-        syn.id    = `SYNTHETIC-${now}-${Math.random().toString(36).slice(2, 5)}`;
-        syn.score = scoreOpportunity(syn);
-        syntheticOp = syn;
-        opportunities.unshift(syn);
-        _lastDemoExecTs = now;
-      }
-    }
-  }
-
   opportunities.sort((a, b) => {
     if (a.viable && !b.viable) return -1;
     if (!a.viable && b.viable) return 1;
@@ -463,7 +371,7 @@ function detectOpportunities(orderBooks, tradeAmount) {
   const triangularSignal = detectTriangularSignal(valid, FEES);
   const evalMs = Date.now() - totalEvalStart;
 
-  return { opportunities, triangularSignal, evalMs, syntheticOp };
+  return { opportunities, triangularSignal, evalMs };
 }
 
 // ─── Triangular signal (informational) ───────────────────────────────────
@@ -576,8 +484,6 @@ function executeSimulated(opportunity, wallets, amount) {
     buySource:       opportunity.buySource,
     sellSource:      opportunity.sellSource,
     feeMode:         opportunity.feeMode || (USE_MAKER_FEES ? 'maker' : 'taker'),
-    synthetic:       opportunity.synthetic || false,
-    syntheticNote:   opportunity.syntheticNote || null,
     status:          execNetProfit > 0 ? 'profit' : 'loss',
     executionMs:     Date.now() - t0,
     ts:              new Date().toISOString(),
@@ -586,9 +492,139 @@ function executeSimulated(opportunity, wallets, amount) {
   return { ok: true, trade };
 }
 
+// ─── executeTriangularSimulated ───────────────────────────────────────────
+/**
+ * Executes a 2-leg triangular arb signal as two simulated trades.
+ *
+ * Strategy: A→B→C means:
+ *   Leg 1: Buy BTC in exchange A (spend USDT on A, receive BTC on A)
+ *   Leg 2: Sell BTC in exchange C (spend BTC on C, receive USDT on C)
+ *   (B is the mid-exchange whose bid/ask created the opportunity)
+ *
+ * Minimum threshold: netPct must exceed 0.05% to cover slippage uncertainty
+ * across two legs. This is intentionally conservative.
+ *
+ * Returns two trade objects (leg1, leg2) or { ok: false, reason }.
+ */
+const MIN_TRIANGULAR_NET_PCT = 0.05; // 0.05% minimum net for auto-execution
+
+function executeTriangularSimulated(signal, orderBooks, wallets, amount) {
+  if (!signal) return { ok: false, reason: 'No triangular signal' };
+  if ((signal.netPct || 0) < MIN_TRIANGULAR_NET_PCT) {
+    return { ok: false, reason: `Triangular netPct ${signal.netPct}% < ${MIN_TRIANGULAR_NET_PCT}% minimum` };
+  }
+
+  const FEES = getFees();
+  const execAmount = amount != null ? amount : DEFAULT_TRADE_AMOUNT;
+  const t0 = Date.now();
+
+  // Parse the path "Exchange A → Exchange B → Exchange C"
+  const parts = signal.path.split(' → ').map(s => s.trim());
+  if (parts.length < 3) return { ok: false, reason: 'Invalid triangular path format' };
+
+  const [exA, , exC] = parts;
+
+  const bookA = orderBooks.find(ob => ob.exchange === exA);
+  const bookC = orderBooks.find(ob => ob.exchange === exC);
+
+  if (!bookA || !bookC) return { ok: false, reason: `Order book missing for ${exA} or ${exC}` };
+  if (!bookA.ask || !bookC.bid) return { ok: false, reason: 'Invalid prices in order books' };
+
+  const askA  = bookA.ask;
+  const bidC  = bookC.bid;
+  const feeA  = FEES[exA] || 0.001;
+  const feeC  = FEES[exC] || 0.001;
+
+  const usdtNeeded = askA * execAmount;
+  const btcNeeded  = execAmount;
+
+  if ((wallets.USDT?.[exA] || 0) < usdtNeeded) {
+    return { ok: false, reason: `Insufficient USDT on ${exA} for triangular leg 1` };
+  }
+  if ((wallets.BTC?.[exC] || 0) < btcNeeded) {
+    return { ok: false, reason: `Insufficient BTC on ${exC} for triangular leg 2` };
+  }
+
+  const leg1GrossProfit = 0;                             // spend USDT, receive BTC
+  const leg1BuyFee      = +(askA * execAmount * feeA).toFixed(4);
+  const leg2GrossProfit = +((bidC - askA) * execAmount).toFixed(4);
+  const leg2SellFee     = +(bidC * execAmount * feeC).toFixed(4);
+
+  const totalNetProfit  = +(leg2GrossProfit - leg1BuyFee - leg2SellFee).toFixed(4);
+  const totalNetPct     = +((totalNetProfit / usdtNeeded) * 100).toFixed(4);
+
+  // Re-validate net profit after real fee calculation
+  if (totalNetProfit <= MIN_NET_PROFIT) {
+    return { ok: false, reason: `Triangular net $${totalNetProfit} after real fees below threshold` };
+  }
+
+  const leg1 = {
+    id:            `tri-leg1-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type:          'triangular_leg1',
+    buyExchange:   exA,
+    sellExchange:  exA,  // both sides on exchange A (buy BTC with USDT)
+    buyPrice:      +askA.toFixed(2),
+    sellPrice:     +askA.toFixed(2),
+    amount:        +execAmount.toFixed(6),
+    grossProfit:   0,
+    buyFee:        leg1BuyFee,
+    sellFee:       0,
+    totalFees:     leg1BuyFee,
+    slippage:      0,
+    slippagePct:   0,
+    slippageMethod:'triangular',
+    netProfit:     +(-leg1BuyFee).toFixed(4),
+    netProfitPct:  +((-leg1BuyFee / usdtNeeded) * 100).toFixed(4),
+    spreadPct:     signal.grossPct || 0,
+    breakEvenPct:  0,
+    score:         50,
+    buySource:     bookA.source || 'ws',
+    sellSource:    bookA.source || 'ws',
+    feeMode:       USE_MAKER_FEES ? 'maker' : 'taker',
+    status:        'triangular_buy',
+    triangularPath: signal.path,
+    triangularLeg:  1,
+    executionMs:   Date.now() - t0,
+    ts:            new Date().toISOString(),
+  };
+
+  const leg2 = {
+    id:            `tri-leg2-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    type:          'triangular_leg2',
+    buyExchange:   exA,  // BTC was bought on A
+    sellExchange:  exC,  // BTC is sold on C
+    buyPrice:      +askA.toFixed(2),
+    sellPrice:     +bidC.toFixed(2),
+    amount:        +execAmount.toFixed(6),
+    grossProfit:   +leg2GrossProfit.toFixed(4),
+    buyFee:        leg1BuyFee,
+    sellFee:       leg2SellFee,
+    totalFees:     +(leg1BuyFee + leg2SellFee).toFixed(4),
+    slippage:      0,
+    slippagePct:   0,
+    slippageMethod:'triangular',
+    netProfit:     totalNetProfit,
+    netProfitPct:  totalNetPct,
+    spreadPct:     +(((bidC - askA) / askA) * 100).toFixed(4),
+    breakEvenPct:  +((leg1BuyFee + leg2SellFee) / usdtNeeded * 100).toFixed(4),
+    score:         60,
+    buySource:     bookA.source || 'ws',
+    sellSource:    bookC.source || 'ws',
+    feeMode:       USE_MAKER_FEES ? 'maker' : 'taker',
+    status:        totalNetProfit > 0 ? 'profit' : 'loss',
+    triangularPath: signal.path,
+    triangularLeg:  2,
+    executionMs:   Date.now() - t0,
+    ts:            new Date().toISOString(),
+  };
+
+  return { ok: true, leg1, leg2, totalNetProfit, totalNetPct };
+}
+
 module.exports = {
   detectOpportunities,
   executeSimulated,
+  executeTriangularSimulated,
   getDailyPnl,
   addDailyPnl,
   isDailyLossBreached,
@@ -602,5 +638,5 @@ module.exports = {
   _MIN_SPREAD_PCT: MIN_SPREAD_PCT,
   _DEFAULT_TRADE_AMOUNT: DEFAULT_TRADE_AMOUNT,
   _USE_MAKER_FEES: USE_MAKER_FEES,
-  _DEMO_MODE: DEMO_MODE,
+  _MIN_TRIANGULAR_NET_PCT: MIN_TRIANGULAR_NET_PCT,
 };

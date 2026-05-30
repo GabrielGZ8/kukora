@@ -4,186 +4,241 @@
 ![Deploy](https://img.shields.io/badge/deploy-Railway-purple)
 ![Exchanges](https://img.shields.io/badge/exchanges-5-blue)
 ![Detection](https://img.shields.io/badge/detection-event--driven%20WS-orange)
+![Data](https://img.shields.io/badge/data-100%25%20real%20market-green)
 
-> Real-time Bitcoin arbitrage across 5 exchanges.
-> Event-driven detection <30ms · VWAP L2 slippage · 7-factor scoring · quantitative volatility engine.
+> Detección y ejecución simulada de arbitraje de Bitcoin en tiempo real.
+> Event-driven <30ms · VWAP L2 slippage real · Score compuesto 7 factores · 5 exchanges simultáneos · **Triangular auto-ejecutable** · Equity curve 100% real.
 
 ## 🚀 Live Demo
 
 **URL:** https://kukora.up.railway.app
 
-## ✨ Features
+---
 
-- **5 exchanges** simultaneously: Binance, Kraken, Bybit, OKX, Coinbase
-- **Event-driven WS detection** — arbitrage opportunities found in <30ms
-- **Real L2 VWAP slippage** computed from live order book depth on 5 exchanges
-- **7-factor composite scoring** with log-scale profitability curve
-- **4-level circuit breaker**: spread bounds + liquidity check + daily stop + fingerprint dedup
-- **Pre-funded bilateral model** — institutional-grade execution model
-- **MongoDB-backed equity curve** with graceful in-memory fallback
-- **SSE real-time UI** with permanent reconnect and silence detection
+## El Sistema
+
+Kukora monitorea 5 exchanges simultáneamente via WebSocket, detecta divergencias de precio en tiempo real y simula la ejecución de operaciones de arbitraje con un modelo de costos completo: fees reales de cada exchange, slippage VWAP calculado desde el order book L2 en vivo, y circuit breakers de 4 niveles.
+
+Todas las oportunidades detectadas y operaciones ejecutadas provienen exclusivamente de datos de mercado reales. No hay spreads sintéticos ni inyecciones artificiales.
 
 ---
 
-## Detection Architecture — Event-Driven
+## Arquitectura de Detección — Event-Driven
 
-### Why event-driven matters
+### Por qué importa
 
-Most arbitrage systems use polling every N seconds. Kukora uses detection event-driven, triggered on every WS message:
+La mayoría de sistemas de arbitraje usan polling cada N segundos. Kukora dispara la detección en cada mensaje WebSocket entrante:
 
 ```
-Traditional (polling):
-  WS message → wait loop (up to 800ms) → detect → execute
-  Total latency: 800ms–1800ms
+Polling tradicional:
+  Mensaje WS → esperar ciclo (hasta 800ms) → detectar → ejecutar
+  Latencia total: 800ms – 1800ms
 
 Kukora (event-driven):
-  WS message → emit('priceUpdate') → detect → execute
-  Total latency: < 30ms
+  Mensaje WS → emit('priceUpdate') → detectar → ejecutar
+  Latencia total: < 30ms
 ```
 
-### Components
+### Flujo
 
-- `exchangeService.js` emits `priceUpdate` on every WS message via EventEmitter
-- `arbitrage.routes.js` listens to the event and immediately triggers detection
-- SSE loop (150ms) only updates the UI — does not block detection
-- Cache TTL reduced to 150ms for always-fresh data
+```
+exchangeService.js
+  ↓ ws.on('message') → markUpdated() → priceEmitter.emit('priceUpdate')
+arbitrage.routes.js
+  ↓ priceEmitter.on('priceUpdate') → detectOpportunities() → executeSimulated()
+SSE loop (150ms)
+  → solo actualiza la UI, no bloquea la detección
+```
+
+El loop SSE de 150ms es únicamente para streaming de estado a la UI. La detección ocurre fuera de ese loop, en el momento en que llega el dato de mercado.
 
 ---
 
-## Execution Model — Pre-funded Bilateral
+## Modelo de Ejecución — Bilateral Pre-funded
 
-Kukora implements pre-funded bilateral arbitrage — the standard model in professional institutional systems:
+Kukora implementa el modelo bilateral pre-funded, estándar en sistemas institucionales:
 
-- Wallets pre-funded with BTC and USDT on all 5 exchanges simultaneously
-- Each trade: buy BTC on exchange A + sell BTC on exchange B simultaneously, without inter-exchange asset transfers
-- **Withdrawal fees** = periodic rebalancing cost (~every 24h), not deducted per-trade
-- Matches the official challenge example model (only trading fees deducted per operation)
+- Wallets pre-funded con BTC y USDT en los 5 exchanges simultáneamente
+- Cada trade: compra BTC en exchange A + venta BTC en exchange B de forma simultánea, sin transferencias inter-exchange por operación
+- **Withdrawal fees** = costo de rebalanceo periódico (~cada 24h), no deducido por trade
+- Coincide exactamente con el modelo del ejemplo oficial del challenge
 
-### P&L Formula
+### Fórmula P&L
 
 ```
 netProfit = grossProfit − buyFee − sellFee − slippageCost
+
+grossProfit  = (bidB − askA) × amount
+buyFee       = askA  × amount × feeExchangeA
+sellFee      = bidB  × amount × feeExchangeB
+slippageCost = VWAP L2 cuando hay order book disponible, fallback 0.05%/lado
 ```
 
-*[Informational]* withdrawalCostPeriodic ≈ $25–56 per rebalancing round (amortized across ~50 trades)
-
-### Official Challenge Example (matched exactly)
+### Ejemplo del challenge (replicado exactamente)
 
 ```
-Exchange A (Kraken): Buy Ask $70,000 + fee $70   = cost $70,070
-Exchange B (Binance): Sell Bid $70,250 − fee $70.25 = income $70,179.75
-Net profit: $109.75 USD
+Exchange A (Kraken): Comprar Ask $70,000 + fee $70   = costo $70,070
+Exchange B (Binance): Vender Bid $70,250 − fee $70.25 = ingreso $70,179.75
+Ganancia neta: $109.75 USD
 ```
-
-Only trading fees deducted → pre-funded bilateral model.
 
 ---
 
-## Composite Opportunity Score (0–100)
+## Score Compuesto de Oportunidades (0–100)
 
-| Factor        | Max pts | Formula                                         |
-|---------------|---------|------------------------------------------------ |
-| Rentabilidad  | 35      | `log1p(netProfitPct×500)×5.5`, capped at 35     |
-| Liquidez      | 20      | `max(0, 20×(1−slipRatio×1.5))`                  |
-| Persistencia  | 15      | Optimal zone 0.10%–0.80% spread                 |
-| Latencia      | 15      | 15 if both WS, degrades with HTTP ms            |
-| Confianza     | 10      | WS source (6pts) + VWAP method (4pts)           |
-| Penalización  | −3 pts  | Feed age > 3s                                   |
+Cada oportunidad recibe un score antes de decidir si ejecutarla. El sistema prioriza oportunidades de mayor score cuando hay múltiples viables simultáneas.
+
+| Factor        | Máx pts | Fórmula                                          |
+|---------------|---------|--------------------------------------------------|
+| Rentabilidad  | 35      | `log1p(netProfitPct×500)×5.5`, techo en 35       |
+| Liquidez      | 20      | `max(0, 20×(1−slipRatio×1.5))`                   |
+| Persistencia  | 15      | Zona óptima 0.10%–0.80% de spread                |
+| Latencia      | 15      | 15 si ambos WS, degrada con ms de HTTP           |
+| Confianza     | 10      | Fuente WS (6 pts) + método VWAP (4 pts)          |
+| Penalización  | −3 pts  | Feed con antigüedad > 3s                         |
+| Penalización  | −5 pts  | Coinbase (fee 0.60% vs 0.10% en otros)           |
 
 ---
 
-## Risk Controls
+## Circuit Breakers — 5 Niveles
 
-| Control               | Value        | Description                                   |
-|-----------------------|--------------|-----------------------------------------------|
-| MIN_NET_PROFIT        | $0.10        | Minimum net profit per trade                  |
-| MIN_SPREAD_PCT        | 0.02%        | Circuit breaker lower bound                   |
-| MAX_SPREAD_PCT        | 3.0%         | Circuit breaker upper bound (stale data guard)|
-| MAX_DAILY_LOSS        | −$500        | Daily stop-loss — bot halts automatically     |
-| FINGERPRINT_TTL       | 5,000ms      | Dedup window — same price level               |
-| MIN_EXEC_INTERVAL     | 300ms        | Min time between loop executions             |
-| EVENT_EXEC_COOLDOWN   | 300ms        | Min time between event-driven executions      |
-| Balance validation    | pre-check    | Balances verified before execution, rollback  |
+| Control               | Valor        | Descripción                                              |
+|-----------------------|--------------|----------------------------------------------------------|
+| `MIN_NET_PROFIT`      | $0.05        | Ganancia neta mínima (escala con 0.05 BTC × trade size)  |
+| `MIN_SPREAD_PCT`      | 0.005%       | Spread mínimo — rechaza ruido de mercado                 |
+| `MAX_SPREAD_PCT`      | 3.0%         | Spread máximo — indica datos obsoletos                   |
+| `MAX_DAILY_LOSS`      | −$500        | Stop-loss diario — el bot se detiene automáticamente     |
+| `FINGERPRINT_TTL`     | 5,000ms      | Deduplicación — mismo nivel de precio no se repite       |
+| `MIN_EXEC_INTERVAL`   | 300ms        | Tiempo mínimo entre ejecuciones                          |
+| Validación de balance | pre-check    | Balances verificados antes de ejecutar, rollback si falla|
+| Liquidez L2           | 50% fill min | Ejecuta parcial si 50–99% disponible; rechaza <50%       |
+| Triangular mínimo     | 0.05% neto   | Auto-ejecuta triangular solo si netPct ≥ 0.05%           |
+
+---
+
+## Slippage VWAP Real
+
+Para los exchanges con order book L2 en vivo (Binance, Kraken, Bybit, OKX), el slippage se calcula recorriendo los niveles del libro hasta llenar el volumen de la orden:
+
+```javascript
+// VWAP walk through L2 levels
+let remaining = tradeAmount;
+for (const [price, qty] of levels) {
+  const fill = Math.min(remaining, qty);
+  totalCost += fill * price;
+  remaining -= fill;
+  if (remaining <= 0) break;
+}
+const avgPrice    = totalCost / tradeAmount;
+const slippagePct = Math.abs((avgPrice - topPrice) / topPrice) * 100;
+```
+
+Si el order book no está disponible (Coinbase o feed caído), se usa fallback conservador de 0.05% por lado.
+
+---
+
+## Exchanges y Feeds
+
+| Exchange  | Protocolo      | Datos recibidos                        | Fee taker |
+|-----------|---------------|----------------------------------------|-----------|
+| Binance   | WebSocket      | bookTicker + depth5@100ms              | 0.10%     |
+| Kraken    | WebSocket v2   | ticker + book depth 10 (incremental)   | 0.26%     |
+| Bybit     | WebSocket      | tickers + orderbook.50                 | 0.10%     |
+| OKX       | WebSocket      | books5 + tickers                       | 0.10%     |
+| Coinbase  | WebSocket      | Advanced Trade ticker público          | 0.60%     |
+
+Los 4 primeros exchanges mantienen order book L2 sincronizado con actualizaciones incrementales. Coinbase se usa solo para detección de precio (no para L2 slippage).
+
+Un **watchdog** monitorea cada 8s si algún feed lleva >5s sin actualizar y fuerza reconexión automática con backoff exponencial (máximo 30s).
+
+---
+
+## Señal Triangular (informacional)
+
+El sistema evalúa también rutas de 3 exchanges (`A → B → C`) buscando oportunidades multi-leg. Cuando encuentra una con netPct positivo neto de fees y slippage, la muestra en la UI como señal informacional. No se ejecuta automáticamente.
+
+```
+netPct = ((1 + s1) × (1 + s2) − 1) × 100 − feesPct − slippageFallback
+```
 
 ---
 
 ## Stack
 
-| Layer     | Tech                                              |
-|-----------|---------------------------------------------------|
-| Frontend  | React + Vite + Recharts                           |
-| Backend   | Node.js + Express                                 |
-| Realtime  | SSE (client) + EventEmitter (server)              |
-| WS feeds  | Binance, Kraken, Bybit, OKX (4× concurrent)       |
-| HTTP feed | Coinbase (dual /buy + /sell for real spread)      |
-| Database  | MongoDB Atlas (optional, in-memory fallback)      |
-| Deploy    | Railway                                           |
+| Capa       | Tecnología                                        |
+|------------|---------------------------------------------------|
+| Frontend   | React 18 + Vite + Recharts                        |
+| Backend    | Node.js + Express                                 |
+| Realtime   | SSE (cliente) + EventEmitter (servidor)           |
+| WS feeds   | Binance, Kraken, Bybit, OKX (4× concurrentes)     |
+| HTTP feed  | Coinbase Advanced Trade (fallback REST)           |
+| Base datos | MongoDB Atlas (opcional, fallback en memoria)     |
+| Deploy     | Railway                                           |
 
 ---
 
-## Setup
+## Setup Local
 
 ```bash
-# Install dependencies
+# Instalar dependencias
 npm install
 
-# Configure environment
+# Configurar entorno
 cp .env.example .env
-# Set MONGODB_URI (optional), PORT, ADMIN_TOKEN
+# Editar .env: ajustar PORT, MONGODB_URI (opcional), ADMIN_TOKEN
 
-# Run development
+# Desarrollo (servidor + Vite en paralelo)
 npm run dev
 
-# Run smoke tests
-node tests/smoke.test.js
+# Ejecutar smoke tests
+npm test
 ```
+
+### Variables de entorno
+
+| Variable           | Default       | Descripción                                          |
+|--------------------|---------------|------------------------------------------------------|
+| `PORT`             | `5000`        | Puerto del servidor                                  |
+| `NODE_ENV`         | `development` | `production` sirve el frontend compilado             |
+| `MONGODB_URI`      | —             | MongoDB Atlas (opcional — usa memoria si no se define)|
+| `ADMIN_TOKEN`      | —             | Protege el endpoint `POST /api/arbitrage/reset`      |
+| `WALLET_BTC`       | `1`           | BTC inicial por exchange                             |
+| `WALLET_USDT`      | `110000`      | USDT inicial por exchange (cubre ~20 trades 0.05 BTC)|
+| `TRADE_AMOUNT_BTC` | `0.05`        | Tamaño de operación en BTC (5× vs v6)                |
+| `FORCE_MAKER_FEES` | `false`       | Usa maker fees en lugar de taker fees                |
 
 ---
 
 ## Tests
 
 ```bash
-node tests/smoke.test.js
-# → ✅ All 8 tests passed — Kukora smoke test OK
+npm test
+# → ✓ All tests passed — Kukora smoke test OK
 ```
 
-Tests cover: fee config values, VWAP slippage calculation, opportunity detection with viable spread, circuit breaker activation, trade execution, score range validation, and pre-funded bilateral model correctness.
+Los tests cubren: valores de fee config, cálculo VWAP slippage, detección con spread viable, activación de circuit breaker, ejecución de trade, rango de score, y correctitud del modelo bilateral pre-funded.
 
 ---
 
 ## API Endpoints
 
-| Endpoint                       | Description                            |
-|--------------------------------|----------------------------------------|
-| `GET /api/arbitrage/stream`    | SSE real-time stream (primary)         |
-| `GET /api/arbitrage/live`      | REST snapshot (fallback)               |
-| `GET /api/arbitrage/stats`     | Detailed system stats + counters       |
-| `GET /api/arbitrage/history`   | Trade history                          |
-| `GET /api/arbitrage/wallets`   | Current wallet balances                |
-| `POST /api/arbitrage/bot`      | Toggle bot on/off, set min score       |
-| `POST /api/arbitrage/reset`    | Reset wallets + equity curve           |
+| Endpoint                       | Descripción                                    |
+|--------------------------------|------------------------------------------------|
+| `GET /api/arbitrage/stream`    | SSE stream en tiempo real (primario)           |
+| `GET /api/arbitrage/live`      | Snapshot REST (fallback)                       |
+| `GET /api/arbitrage/stats`     | Stats detallados del sistema + contadores      |
+| `GET /api/arbitrage/history`   | Historial de trades ejecutados                 |
+| `GET /api/arbitrage/wallets`   | Saldos actuales por exchange                   |
+| `POST /api/arbitrage/bot`      | Activar/desactivar bot, ajustar minScore       |
+| `POST /api/arbitrage/reset`    | Reset wallets + equity curve (requiere token)  |
+| `GET /health`                  | Health check del servidor                      |
 
 ---
 
-## Why Kukora Wins
-
-1. **Event-driven WS detection** — < 30ms latency (vs 800ms–5s polling in typical systems)
-2. **Real L2 VWAP slippage** computed from 4 simultaneous live order books
-3. **7-factor composite scoring** with log-scale profitability curve — avoids identical scores
-4. **4-level circuit breaker**: spread bounds + liquidity + daily stop + fingerprint dedup
-5. **Institutional pre-funded model** matching real professional arbitrage (Jump, Cumberland, DRW)
-6. **MongoDB-backed equity curve** with graceful in-memory fallback + synthetic baseline on cold start
-7. **5-exchange coverage**: Binance, Kraken, Bybit, OKX, Coinbase
-8. **Permanent SSE reconnect** with proactive silence detection (10s timeout)
-
----
-
-## Deployment
-
-Railway is the recommended platform (included `railway.toml` + `Procfile`).
+## Deploy en Railway
 
 ```toml
-# railway.toml already configured
+# railway.toml — ya configurado
 [build]
 builder = "nixpacks"
 
@@ -191,9 +246,25 @@ builder = "nixpacks"
 startCommand = "node server/index.js"
 ```
 
-Environment variables:
-- `MONGODB_URI` — MongoDB Atlas connection string (optional)
-- `PORT` — Server port (Railway sets automatically)
-- `ADMIN_TOKEN` — Protects `/reset` endpoint
-- `WALLET_BTC` — Initial BTC per exchange (default: 1)
-- `WALLET_USDT` — Initial USDT per exchange (default: 70000)
+El `Procfile` y `railway.toml` están incluidos. Railway detecta automáticamente Node.js y ejecuta `npm run build` + `node server/index.js`.
+
+Variables de entorno a configurar en Railway:
+- `NODE_ENV=production`
+- `MONGODB_URI` (opcional pero recomendado para persistir historial de trades)
+- `ADMIN_TOKEN` (para proteger el endpoint de reset)
+
+---
+
+## Decisiones Técnicas
+
+**¿Por qué event-driven y no polling?**
+El polling introduce latencia proporcional al intervalo configurado. Con event-driven, la detección ocurre en el mismo tick del loop de Node.js en que llega el dato del exchange. En arbitraje, cada milisegundo cuenta.
+
+**¿Por qué pre-funded bilateral?**
+El modelo alternativo (transferir activos entre exchanges por cada trade) es inviable en práctica: los tiempos de confirmación on-chain son de minutos, no milisegundos. El modelo pre-funded es el estándar en firms como Jump Trading, Cumberland y DRW para trading de crypto institucional.
+
+**¿Por qué VWAP L2 y no precio mid?**
+El precio mid ignora el impacto de mercado. Con 0.01 BTC a $100k, el slippage real es mínimo (~$0.50). Pero con 0.1 BTC o en exchanges con menor liquidez, el VWAP walk puede cambiar la viabilidad de una operación. Calcularlo desde el order book en vivo es la única forma precisa.
+
+**¿Por qué score compuesto y no simple rentabilidad?**
+Una oportunidad con spread de 0.80% en un exchange con feed de 4s de antigüedad es mucho menos confiable que una de 0.30% con ambos feeds WS frescos. El score penaliza staleness, latencia, y exchanges de alto fee, priorizando operaciones con mayor probabilidad de ejecución exitosa.

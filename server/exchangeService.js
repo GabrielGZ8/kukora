@@ -17,7 +17,7 @@
  */
 
 const EventEmitter = require('events');
-const { TRADING_FEES: FEES } = require('./FeeConfig');
+const { TRADING_FEES: FEES } = require('./feeConfig');
 
 const priceEmitter = new EventEmitter();
 priceEmitter.setMaxListeners(20);

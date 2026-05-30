@@ -43,6 +43,10 @@ try {
   ArbitrageOp = mongoose.model('ArbitrageOp', ArbitrageOpSchema);
 }
 
+// Default wallets sized for 0.05 BTC trades at up to $110k/BTC:
+//   USDT: $110,000 per exchange → covers ~20 consecutive buys before rebalancing needed
+//   BTC:  1 BTC per exchange → covers ~20 sells at 0.05 BTC per trade
+// Both configurable via environment variables.
 const INITIAL_BALANCES = {
   BTC: {
     Binance:  parseFloat(process.env.WALLET_BTC  || '1'),
@@ -52,11 +56,11 @@ const INITIAL_BALANCES = {
     OKX:      parseFloat(process.env.WALLET_BTC  || '1'),
   },
   USDT: {
-    Binance:  parseFloat(process.env.WALLET_USDT || '70000'),
-    Kraken:   parseFloat(process.env.WALLET_USDT || '70000'),
-    Bybit:    parseFloat(process.env.WALLET_USDT || '70000'),
-    Coinbase: parseFloat(process.env.WALLET_USDT || '70000'),
-    OKX:      parseFloat(process.env.WALLET_USDT || '70000'),
+    Binance:  parseFloat(process.env.WALLET_USDT || '110000'),
+    Kraken:   parseFloat(process.env.WALLET_USDT || '110000'),
+    Bybit:    parseFloat(process.env.WALLET_USDT || '110000'),
+    Coinbase: parseFloat(process.env.WALLET_USDT || '110000'),
+    OKX:      parseFloat(process.env.WALLET_USDT || '110000'),
   },
 };
 

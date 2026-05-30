@@ -1,5 +1,5 @@
 /**
- * feeConfig.js — centralized fee configuration v4
+ * feeConfig.js — centralized fee configuration v5
  * Single source of truth para trading fees, withdrawal fees, slippage.
  *
  * ─── Execution Model: Pre-funded Bilateral ───────────────────────────────────
@@ -13,21 +13,23 @@
  * Solo se deducen trading fees + slippage del P&L por operación.
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * ─── Break-even spreads (0.01 BTC a $100k BTC, taker fees) ──────────────────
+ * ─── Break-even spreads (0.05 BTC a $100k BTC, taker fees) ──────────────────
  *
- *   Binance → OKX:     0.030%    ← par más competitivo (ambos 0.10% taker)
- *   Binance → Bybit:   0.030%
- *   Binance → Kraken:  0.046%
- *   Binance → Coinbase: 0.080%
- *   Kraken  → Binance: 0.046%
- *   Cualquiera → Coinbase: >0.080%
+ *   Binance → OKX:      0.030%  ← par más competitivo (ambos 0.10% taker)
+ *   Binance → Bybit:    0.030%
+ *   Binance → Kraken:   0.046%
+ *   OKX → Bybit:        0.030%
+ *   Kraken → Binance:   0.046%
+ *   Cualquier par → Coinbase: >0.080% (fee 0.60% convierte a Coinbase en
+ *                              exchange de monitoreo, no de ejecución frecuente)
  *
  *   Con MAKER_FEES activados (FORCE_MAKER_FEES=true):
- *   Binance(maker) → OKX(maker):  0.016%   ← mercado spot actual (~0.01-0.03%)
- *   Binance(maker) → Bybit(maker): 0.016%
+ *   Binance(maker) → OKX(maker):   0.016%
+ *   Binance(maker) → Bybit(maker): 0.009%  ← Bybit maker 0.010%
  *
- *   Con tradeAmount=0.001 BTC (escala mínima):
- *   Break-even Binance→OKX: ~0.030% (igual proporcionalmente, slippage ≈ 0)
+ *   Con tradeAmount=0.05 BTC (default):
+ *   Break-even Binance→OKX: ~0.030% spread bruto antes de slippage
+ *   Slippage VWAP estimado con 0.05 BTC en libro Binance: ~$0.10 total (<0.01%)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 

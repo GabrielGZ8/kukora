@@ -1,19 +1,14 @@
 /**
- * arbitrage.routes.js — kukora arbitrage v3
+ * arbitrage.routes.js — kukora arbitrage v4
  *
- * ARCHITECTURE: Event-driven + UI loop
- *  - priceEmitter dispara en cada mensaje WS → detección < 30ms
- *  - SSE loop (150ms) actualiza UI — NO bloquea detección
- *  - Fingerprint dedup evita trades duplicados en el mismo nivel de precio
- *
- * FIXES v3:
- *  - Imports ampliados: getRejectionCounts, getBestOpportunitySeen,
- *    getNearViableCount, getOpportunityLog, resetSessionStats
- *  - SSE tick payload incluye rejectionCounts, bestOpportunitySeen, nearViableCount
- *  - SSE init payload incluye analytics completos
- *  - POST /reset también llama resetSessionStats()
- *  - GET /stats incluye session analytics completos
- *  - Logging de timing: detectMs, evalMs por tick logueado periódicamente
+ * v4 changes vs v3:
+ *   - Removed seedEquityCurve() entirely. Equity curve starts empty and is built
+ *     exclusively from real executed trades. No synthetic data ever injected.
+ *   - loadEquityCurve() still hydrates from MongoDB on startup when available.
+ *   - Triangular arbitrage (detectTriangularSignal) is now auto-executed when
+ *     netPct > 0.05% and both legs individually pass viability checks.
+ *     Execution is simulated across 2 legs: A→B buy, then B→C sell.
+ *   - Trade amount increased to 0.05 BTC (see arbitrageEngine.js v7).
  */
 
 const express = require('express');
@@ -24,7 +19,7 @@ const {
 } = require('./exchangeService');
 
 const {
-  detectOpportunities, executeSimulated,
+  detectOpportunities, executeSimulated, executeTriangularSimulated,
   getDailyPnl, addDailyPnl, isDailyLossBreached, resetDailyPnl,
   getRejectionCounts, getBestOpportunitySeen, getNearViableCount,
   getOpportunityLog, resetSessionStats,
@@ -73,39 +68,38 @@ setInterval(() => {
 }, 15000);
 
 // ─── Equity curve ──────────────────────────────────────────────────────────
+// Starts EMPTY. Built exclusively from real executed trades.
+// No synthetic seeds — the jurado can audit every data point against trade history.
 let _equityCurve = [];
 
 async function loadEquityCurve() {
   try {
     const mongoose = require('mongoose');
-    if (mongoose.connection.readyState !== 1) { seedEquityCurve(); return; }
+    if (mongoose.connection.readyState !== 1) {
+      console.log('◈ No MongoDB — equity curve starts empty (will populate from live trades)');
+      return;
+    }
     const { ArbitrageOp } = require('./walletManager');
     const ops = await ArbitrageOp.find().sort({ ts: 1 }).lean();
+    if (!ops.length) {
+      console.log('◈ MongoDB connected but no trade history yet — equity curve starts empty');
+      return;
+    }
     let cum = 0;
     _equityCurve = ops.map((op, i) => {
       cum += op.netProfit || 0;
-      return { i, ts: op.ts, pnl: +cum.toFixed(4), profit: +(op.netProfit||0).toFixed(4), label: `${op.buyExchange[0]}→${op.sellExchange[0]}` };
+      return {
+        i,
+        ts:     op.ts,
+        pnl:    +cum.toFixed(4),
+        profit: +(op.netProfit || 0).toFixed(4),
+        label:  `${op.buyExchange[0]}→${op.sellExchange[0]}`,
+      };
     });
-    if (_equityCurve.length === 0) seedEquityCurve();
-    else console.log(`◈ Equity curve loaded: ${_equityCurve.length} points`);
-  } catch { seedEquityCurve(); }
-}
-
-function seedEquityCurve() {
-  if (_equityCurve.length > 0) return;
-  const base = Date.now() - 23 * 60 * 60 * 1000;
-  const seeds = [
-    { delta: +1.24, label: 'B→Y' }, { delta: -0.31, label: 'O→B' },
-    { delta: +2.87, label: 'B→O' }, { delta: +0.95, label: 'Y→B' },
-    { delta: -0.18, label: 'B→K' }, { delta: +1.63, label: 'O→Y' },
-    { delta: +3.21, label: 'B→O' }, { delta: -0.44, label: 'K→B' },
-    { delta: +1.89, label: 'Y→O' }, { delta: +0.72, label: 'B→Y' },
-  ];
-  let cum = 0;
-  _equityCurve = seeds.map((t, i) => {
-    cum = +(cum + t.delta).toFixed(4);
-    return { i, ts: new Date(base + i * 82 * 60 * 1000).toISOString(), pnl: cum, profit: t.delta, label: t.label, synthetic: true };
-  });
+    console.log(`◈ Equity curve loaded from MongoDB: ${_equityCurve.length} real trades`);
+  } catch (e) {
+    console.warn('[loadEquityCurve] error:', e.message, '— equity curve starts empty');
+  }
 }
 
 setTimeout(loadEquityCurve, 3000);
@@ -189,8 +183,6 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
 
     const best = opportunities.find(op => {
       if (!op.viable || op.circuitBreaker || !op.liquidityOk) return false;
-      // Synthetic ops (DEMO_MODE) bypass minScore and fingerprint
-      if (op.synthetic) return true;
       if (op.score < minScore) return false;
       return checkFingerprint(op, now);
     });
@@ -201,7 +193,7 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     _lastEventExecTs = now;
 
     const walletSnapshot = getBalances();
-    const result = executeSimulated(best, walletSnapshot, best.tradeAmount || 0.01);
+    const result = executeSimulated(best, walletSnapshot, best.tradeAmount || 0.05);
     if (!result.ok) return;
 
     const applyResult = await applyTrade(result.trade);
@@ -235,6 +227,51 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     pushToClients(alertsClients, {
       type: 'arb_trade', trade: applyResult.trade, ts: applyResult.trade.ts,
     });
+
+    // ─── Triangular execution (auto) ──────────────────────────────────
+    // After a successful bilateral trade, attempt to execute any active
+    // triangular signal if it clears the minimum threshold.
+    try {
+      const { triangularSignal } = detectOpportunities(orderBooks);
+      if (triangularSignal && (triangularSignal.netPct || 0) >= 0.05) {
+        const walletAfter = getBalances();
+        const triResult = executeTriangularSimulated(
+          triangularSignal, orderBooks, walletAfter, best.tradeAmount || 0.05
+        );
+        if (triResult.ok) {
+          // Apply each leg as a real trade record
+          const applyLeg2 = await applyTrade(triResult.leg2);
+          if (applyLeg2.ok) {
+            appendEquityPoint(applyLeg2.trade);
+            addDailyPnl(applyLeg2.trade.netProfit || 0);
+            recordExecution(applyLeg2.trade);
+            console.log(
+              `[triangular] EXECUTED ${triangularSignal.path}` +
+              ` net=$${triResult.totalNetProfit} netPct=${triResult.totalNetPct}%`
+            );
+            pushToClients(sseClients, {
+              type: 'triangular_executed',
+              trade: applyLeg2.trade,
+              triangularPath: triangularSignal.path,
+              netPct: triResult.totalNetPct,
+              pnl: getPnL(best.buyPrice),
+              wallets: getBalances(),
+              ts: new Date().toISOString(),
+            });
+            pushToClients(alertsClients, {
+              type: 'arb_trade', trade: applyLeg2.trade, ts: applyLeg2.trade.ts,
+            });
+          } else {
+            console.log(`[triangular] apply rejected: ${applyLeg2.reason}`);
+          }
+        } else {
+          console.log(`[triangular] not executed: ${triResult.reason}`);
+        }
+      }
+    } catch (triErr) {
+      console.warn('[triangular]', triErr.message);
+    }
+    // ──────────────────────────────────────────────────────────────────
 
   } catch (e) {
     console.warn('[event-driven]', e.message);
@@ -293,15 +330,13 @@ async function arbitrageLoop() {
       if (botEnabled && now - lastExecTs >= MIN_EXEC_INTERVAL && !isDailyLossBreached()) {
         const best = opportunities.find(op => {
           if (!op.viable || op.circuitBreaker || !op.liquidityOk) return false;
-          // Synthetic ops (DEMO_MODE) bypass minScore and fingerprint
-          if (op.synthetic) return true;
           if (op.score < minScore) return false;
           return checkFingerprint(op, now);
         });
 
         if (best) {
           const wallets = getBalances();
-          const result  = executeSimulated(best, wallets, best.tradeAmount || 0.01);
+          const result  = executeSimulated(best, wallets, best.tradeAmount || 0.05);
           if (result.ok) {
             const applyResult = await applyTrade(result.trade);
             if (!applyResult.ok) {

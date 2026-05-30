@@ -61,30 +61,45 @@ app.use('/api/arbitrage', arbitrageRoutes);
 app.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString(), db: dbConnected, env: IS_PROD ? 'production' : 'development' }));
 
 const { Alert, Watchlist, Portfolio } = require('./models');
+
+// Helper: check if DB is ready before running a query (mongoose already required above)
+const isDbReady = () => mongoose.connection.readyState === 1;
+
 const wrap = fn => async (req, res) => {
   try { res.json({ ok: true, data: await fn(req) }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 };
 
-app.get('/api/alerts',    wrap(() => Alert.find({ userId: 'default' }).sort({ createdAt: -1 })));
-app.post('/api/alerts',   wrap(req => Alert.create({ ...req.body, userId: 'default' })));
-app.delete('/api/alerts/:id', wrap(req => Alert.findByIdAndDelete(req.params.id)));
-app.patch('/api/alerts/:id',  wrap(req => Alert.findByIdAndUpdate(req.params.id, req.body, { new: true })));
+// DB-gated wrapper: returns empty/mock data immediately when no DB is connected
+// instead of hanging 10s then throwing a Mongoose buffering timeout error.
+const wrapDb = (fn, fallback) => async (req, res) => {
+  if (!isDbReady()) {
+    const data = typeof fallback === 'function' ? fallback(req) : fallback;
+    return res.json({ ok: true, data, _noDb: true });
+  }
+  try { res.json({ ok: true, data: await fn(req) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+};
 
-app.get('/api/watchlist', wrap(async () => {
+app.get('/api/alerts',    wrapDb(() => Alert.find({ userId: 'default' }).sort({ createdAt: -1 }), []));
+app.post('/api/alerts',   wrapDb(req => Alert.create({ ...req.body, userId: 'default' }), null));
+app.delete('/api/alerts/:id', wrapDb(req => Alert.findByIdAndDelete(req.params.id), null));
+app.patch('/api/alerts/:id',  wrapDb(req => Alert.findByIdAndUpdate(req.params.id, req.body, { new: true }), null));
+
+app.get('/api/watchlist', wrapDb(async () => {
   const doc = await Watchlist.findOne({ userId: 'default' });
   return { coins: doc?.coins || [] };
-}));
-app.post('/api/watchlist', wrap(async req => {
+}, { coins: [] }));
+app.post('/api/watchlist', wrapDb(async req => {
   const doc = await Watchlist.findOneAndUpdate(
     { userId: 'default' }, { coins: req.body.coins }, { upsert: true, new: true }
   );
   return { coins: doc.coins };
-}));
+}, req => ({ coins: req.body?.coins || [] })));
 
-app.get('/api/portfolio',    wrap(() => Portfolio.find({ userId: 'default' }).sort({ createdAt: -1 })));
-app.post('/api/portfolio',   wrap(req => Portfolio.create({ ...req.body, userId: 'default' })));
-app.delete('/api/portfolio/:id', wrap(req => Portfolio.findByIdAndDelete(req.params.id)));
+app.get('/api/portfolio',    wrapDb(() => Portfolio.find({ userId: 'default' }).sort({ createdAt: -1 }), []));
+app.post('/api/portfolio',   wrapDb(req => Portfolio.create({ ...req.body, userId: 'default' }), null));
+app.delete('/api/portfolio/:id', wrapDb(req => Portfolio.findByIdAndDelete(req.params.id), null));
 
 const { parseCSV, analyzeDataset } = require('./datasetService');
 

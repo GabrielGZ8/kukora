@@ -60,7 +60,7 @@ function SlippageBadge({ method }) {
   const color     = isReal ? 'var(--color-green)' : isPartial ? 'var(--color-yellow)' : 'var(--text-dim)';
   const bg        = isReal ? 'var(--color-green-dim)' : isPartial ? 'var(--color-yellow-dim)' : 'var(--bg-surface-2)';
   return (
-    <span title={isReal ? 'Slippage calculado desde L2 VWAP real del order book' : isPartial ? 'Un leg con VWAP real, otro con fallback 0.05%' : 'Fallback fijo 0.05% (sin depth data)'}
+    <span title={isReal ? 'Slippage calculado desde L2 VWAP real del order book (Binance/Kraken/Bybit/OKX)' : isPartial ? 'Un leg con VWAP real, otro con fallback 0.05%' : 'Fallback fijo 0.05% — sin acceso a L2 depth (siempre activo en Coinbase, que no expone order book público)'}
       style={{ background:bg, color, fontWeight:700, fontSize:8, padding:'1px 5px', borderRadius:3, border:`1px solid ${color}44`, letterSpacing:'0.05em', whiteSpace:'nowrap' }}>
       {label}
     </span>
@@ -167,6 +167,8 @@ export default function ArbitragePage() {
   const wallets          = data?.wallets          || {};
   const pnl              = data?.pnl              || {};
   const wsStatusMap      = data?.wsStatus         || {};
+  const dailyPnl         = data?.dailyPnl         ?? null;
+  const dailyLossBreached = data?.dailyLossBreached ?? false;
   const history          = localHistory;
   const equityCurve      = localEquityCurve;
 
@@ -229,6 +231,9 @@ export default function ArbitragePage() {
           { label:'Viables',   value: viableCount },
           { label:'Drawdown',  value: pnl.maxDrawdown!=null ? `-${pnl.maxDrawdown?.toFixed(1)}%` : '—',
             color: (pnl.maxDrawdown||0) > 5 ? 'var(--color-red)' : (pnl.maxDrawdown||0) > 2 ? 'var(--color-yellow)' : 'var(--color-green)' },
+          ...(dailyPnl !== null ? [{ label:'P&L Hoy', value: `${dailyPnl >= 0 ? '+' : ''}$${Math.abs(dailyPnl).toFixed(2)}`,
+            color: dailyLossBreached ? 'var(--color-red)' : dailyPnl >= 0 ? 'var(--color-green)' : 'var(--color-yellow)',
+            title: dailyLossBreached ? `STOP global activo: pérdida diaria alcanzó límite de $${Math.abs(dailyPnl).toFixed(2)}` : 'P&L acumulado hoy (UTC). Bot se detiene si supera -$500' }] : []),
           { label:'Streak',    value: streakLabel, color: streakColor },
           { label:'Avg Exec',  value: pnl.avgExecutionMs ? `${pnl.avgExecutionMs?.toFixed(0)}ms` : '—' },
           ...(realSlipPct !== null ? [{ label:'VWAP Real', value:`${realSlipPct}%`, color: realSlipPct > 70 ? 'var(--color-green)' : realSlipPct > 30 ? 'var(--color-yellow)' : 'var(--color-red)' }] : []),
@@ -305,6 +310,18 @@ export default function ArbitragePage() {
       </div>
 
       {triangularSignal && <TriangularSignalBanner signal={triangularSignal} />}
+      {dailyLossBreached && (
+        <div style={{ background:'var(--color-red-dim)', border:'1px solid rgba(240,62,62,0.35)', borderRadius:'var(--radius)', padding:'10px 16px', display:'flex', alignItems:'center', gap:10, fontSize:12, marginBottom:0 }}>
+          <span style={{ fontSize:16 }}>🛑</span>
+          <div style={{ flex:1 }}>
+            <span style={{ fontWeight:800, color:'var(--color-red)' }}>Circuit Breaker Global — Bot Detenido</span>
+            <span style={{ color:'var(--text-muted)', marginLeft:8 }}>Pérdida diaria alcanzó el límite de -$500. No se ejecutarán más trades hasta el siguiente día UTC.</span>
+          </div>
+          <span style={{ fontSize:11, fontFamily:'var(--font-mono)', fontWeight:700, color:'var(--color-red)', whiteSpace:'nowrap' }}>
+            P&L hoy: {dailyPnl != null ? `$${dailyPnl.toFixed(2)}` : '—'}
+          </span>
+        </div>
+      )}
 
       {/* ── GRID MEDIO ──────────────────────────────────────────────────── */}
       <div style={{ display:'grid', gridTemplateColumns:'55fr 45fr', gap:16 }}>

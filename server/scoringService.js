@@ -1,5 +1,7 @@
 // ─── scoringService.js ────────────────────────────────────────────────────
-// Score compuesto 0-100 por asset. Pesos configurables en runtime.
+// Score compuesto 0-100 por ASSET (Intelligence page, market screening).
+// NOTE: This is NOT the arbitrage opportunity scoring system.
+//       Arbitrage opportunity scoring lives in arbitrageEngine.js detectOpportunities().
 // Input:  assets: [{ id, name, prices, volume24h?, marketCap? }]
 // Output: [{ asset, score, label, breakdown }] ordenado desc
 

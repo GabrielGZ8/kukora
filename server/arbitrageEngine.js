@@ -21,9 +21,25 @@ const { calcRealSlippage, getDepth }                    = require('./exchangeSer
 const { TRADING_FEES: FEES, WITHDRAWAL_FEES, SLIPPAGE_RATE } = require('./feeConfig');
 
 const SLIPPAGE_FIXED = SLIPPAGE_RATE;
-const MIN_NET_PROFIT = 0.50; // USD — minimum viable net profit per trade
-const MAX_SPREAD_PCT  = 3.0;  // circuit breaker upper bound (tighter than old 5%)
-const MIN_SPREAD_PCT  = 0.08; // circuit breaker lower bound
+const MIN_NET_PROFIT  = 0.50;   // USD — minimum viable net profit per trade
+const MAX_SPREAD_PCT  = 3.0;    // circuit breaker upper bound (tighter than old 5%)
+const MIN_SPREAD_PCT  = 0.08;   // circuit breaker lower bound
+const MAX_DAILY_LOSS  = -500;   // USD — daily loss circuit breaker; bot halts if exceeded
+
+// ─── Daily P&L tracking ────────────────────────────────────────────────────
+let _dailyPnl       = 0;
+let _dailyResetTs   = new Date().setHours(0, 0, 0, 0);
+
+function getDailyPnl()  { return _dailyPnl; }
+function addDailyPnl(n) {
+  const todayMidnight = new Date().setHours(0, 0, 0, 0);
+  if (todayMidnight > _dailyResetTs) { _dailyPnl = 0; _dailyResetTs = todayMidnight; }
+  _dailyPnl = +(_dailyPnl + n).toFixed(4);
+}
+function isDailyLossBreached() {
+  return _dailyPnl <= MAX_DAILY_LOSS;
+}
+function resetDailyPnl() { _dailyPnl = 0; _dailyResetTs = new Date().setHours(0, 0, 0, 0); }
 
 // ─── Historial de slippage para calcular CI ───────────────────────────────
 const _slippageHistory = [];
@@ -187,7 +203,8 @@ function detectOpportunities(orderBooks, tradeAmount = 0.1) {
 
       const liquidityOk = buyLiq.ok && sellLiq.ok;
       const viableRaw = netProfit > MIN_NET_PROFIT;
-      const viable = viableRaw && !circuitBreaker && liquidityOk;
+      const dailyStopped = isDailyLossBreached();
+      const viable = viableRaw && !circuitBreaker && liquidityOk && !dailyStopped;
 
       let rejectionReason = null;
       if (!viable) {
@@ -260,10 +277,14 @@ function detectTriangularSignal(books) {
       for (let c = 0; c < books.length; c++) {
         if (c === a || c === b) continue;
         const s1 = (books[b].bid - books[a].ask) / books[a].ask;
+        // s2 leg: buy at exchange b ask, sell at exchange c bid
         const s2 = (books[c].bid - books[b].ask) / books[b].ask;
-        const grossPct = (s1 + s2) * 100;
+        // Correct compound return: (1+s1)*(1+s2) - 1, not s1+s2
+        const grossPct = ((1 + s1) * (1 + s2) - 1) * 100;
         const feePct   = ((FEES[books[a].exchange] || 0.001) + (FEES[books[b].exchange] || 0.001) + (FEES[books[c].exchange] || 0.001)) * 100;
-        const netPct   = grossPct - feePct;
+        // Include conservative slippage fallback (0.05% per leg × 2 legs) since no VWAP on triangular
+        const slippageFallbackPct = 0.10;
+        const netPct   = grossPct - feePct - slippageFallbackPct;
         if (netPct > 0 && (!best || netPct > best.netPct)) {
           best = {
             path:       `${books[a].exchange} → ${books[b].exchange} → ${books[c].exchange}`,
@@ -350,4 +371,4 @@ function executeSimulated(opportunity, wallets, amount = 0.1) {
   return { ok: true, trade };
 }
 
-module.exports = { detectOpportunities, executeSimulated };
+module.exports = { detectOpportunities, executeSimulated, getDailyPnl, addDailyPnl, isDailyLossBreached, resetDailyPnl };

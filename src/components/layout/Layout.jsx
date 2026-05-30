@@ -39,21 +39,27 @@ const NAV = [
   { path: '/portfolio',    label: 'Portfolio',            icon: NavIcons.portfolio, group: 'tools' },
   { path: '/watchlist',    label: 'Watchlist',            icon: NavIcons.watchlist, group: 'tools' },
   { path: '/markets',      label: 'Markets',              icon: NavIcons.markets, group: 'tools' },
-  // ─── Avanzado (colapsable) ───────────────────────────────────────────
-  { path: '/analyze',      label: 'Dataset Analyzer',     icon: NavIcons.analyze, group: 'advanced',  badge: '↑CSV', tip: 'Sube cualquier CSV de precios y ejecuta el stack cuantitativo completo' },
-  { path: '/compare',      label: 'Comparar Activos',     icon: NavIcons.compare, group: 'advanced',  tip: 'Compara hasta 4 activos: retornos normalizados, Sharpe, drawdown' },
-  { path: '/risk',         label: 'Risk Engine',          icon: NavIcons.risk, group: 'advanced',  tip: 'VaR histórico, Beta, Sharpe y métricas de riesgo' },
-  { path: '/forecast',     label: 'Forecast',             icon: NavIcons.forecast, group: 'advanced',  tip: 'Proyecciones con intervalos de confianza' },
-  { path: '/intelligence', label: 'Intelligence',         icon: NavIcons.intel, group: 'advanced',  tip: 'Scoring multi-factor y detección de oportunidades' },
-  { path: '/analytics',    label: 'Analytics',            icon: NavIcons.analytics, group: 'advanced',  tip: 'Análisis técnico avanzado con indicadores' },
-  { path: '/regime',       label: 'Market Regime',        icon: NavIcons.regime, group: 'advanced',  badge: 'AI',   tip: 'IA detecta el régimen del mercado en tiempo real' },
-  { path: '/heatmap',      label: 'Heatmap',              icon: NavIcons.heatmap, group: 'advanced' },
-  { path: '/galaxy',       label: 'Correlation Galaxy',   icon: NavIcons.intel, group: 'advanced',  badge: 'LIVE', tip: 'Red animada de correlaciones entre activos' },
-  { path: '/montecarlo',   label: 'Monte Carlo',          icon: NavIcons.montecarlo, group: 'advanced',  tip: 'Simulación GBM con miles de trayectorias' },
-  { path: '/backtest',     label: 'Backtest',             icon: NavIcons.backtest, group: 'advanced',  tip: 'Prueba estrategias sobre datos históricos' },
+  // ─── Avanzado (análisis cuantitativo) ───────────────────────────────
+  { path: '/analyze',      label: 'Dataset Analyzer',     icon: NavIcons.analyze,    group: 'advanced', badge: '↑CSV', tip: 'Sube cualquier CSV de precios y ejecuta el stack cuantitativo completo' },
+  { path: '/compare',      label: 'Comparar Activos',     icon: NavIcons.compare,    group: 'advanced', tip: 'Compara hasta 4 activos: retornos normalizados, Sharpe, drawdown' },
+  { path: '/risk',         label: 'Risk Engine',          icon: NavIcons.risk,       group: 'advanced', tip: 'VaR histórico, Beta, Sharpe y métricas de riesgo' },
+  { path: '/intelligence', label: 'Intelligence',         icon: NavIcons.intel,      group: 'advanced', tip: 'Scoring multi-factor y detección de oportunidades' },
+  { path: '/analytics',    label: 'Analytics',            icon: NavIcons.analytics,  group: 'advanced', tip: 'Análisis técnico avanzado con indicadores' },
+  { path: '/heatmap',      label: 'Heatmap',              icon: NavIcons.heatmap,    group: 'advanced' },
+  // ─── Módulos de investigación cuantitativa (experimentales) ──────────
+  { path: '/forecast',     label: 'Forecast',             icon: NavIcons.forecast,   group: 'research', tip: 'Proyecciones de precio con intervalos de confianza' },
+  { path: '/regime',       label: 'Market Regime',        icon: NavIcons.regime,     group: 'research', badge: 'AI',   tip: 'Detección de régimen de mercado (tendencia/rango/crisis)' },
+  { path: '/galaxy',       label: 'Correlation Galaxy',   icon: NavIcons.galaxy,     group: 'research', badge: 'LIVE', tip: 'Red animada de correlaciones entre activos' },
+  { path: '/montecarlo',   label: 'Monte Carlo',          icon: NavIcons.montecarlo, group: 'research', tip: 'Simulación GBM con miles de trayectorias de precio' },
+  { path: '/backtest',     label: 'Backtest',             icon: NavIcons.backtest,   group: 'research', tip: 'Prueba estrategias sobre datos históricos' },
 ];
 
-const GROUP_LABELS = { core: 'Principal', tools: 'Herramientas', advanced: 'Avanzado' };
+const GROUP_LABELS = {
+  core:     'Principal',
+  tools:    'Herramientas',
+  advanced: 'Análisis Cuantitativo',
+  research: '🔬 Investigación',
+};
 
 // ─── Altura compartida logo/topbar — debe ser idéntica ───────────────────
 const HEADER_H = 56;

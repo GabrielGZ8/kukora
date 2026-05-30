@@ -267,10 +267,12 @@ function getPnL(currentBtcPrice = null) {
   const pairStats = {};
   tradeHistory.forEach(t => {
     const key = `${t.buyExchange}→${t.sellExchange}`;
-    if (!pairStats[key]) pairStats[key] = { count: 0, totalPnl: 0, wins: 0, totalFees: 0 };
+    if (!pairStats[key]) pairStats[key] = { count: 0, totalPnl: 0, wins: 0, totalFees: 0, totalWithdrawalFees: 0 };
     pairStats[key].count++;
     pairStats[key].totalPnl += t.netProfit || 0;
-    pairStats[key].totalFees += (t.totalFees || 0) + (t.withdrawalFees || 0);
+    // Only trading fees here — withdrawalFees already reflected in netProfit (deducted once in arbitrageEngine)
+    pairStats[key].totalFees += (t.totalFees || (t.buyFee||0) + (t.sellFee||0));
+    pairStats[key].totalWithdrawalFees = (pairStats[key].totalWithdrawalFees || 0) + (t.withdrawalFees || 0);
     if ((t.netProfit || 0) > 0) pairStats[key].wins++;
   });
 

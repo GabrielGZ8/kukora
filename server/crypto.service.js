@@ -41,7 +41,7 @@ const processQueue = async () => {
   while (_queue.length) {
     const { fn, resolve, reject } = _queue.shift();
     try { resolve(await fn()); } catch (e) { reject(e); }
-    if (_queue.length) await new Promise(r => setTimeout(r, 600)); // 600ms = ~100 req/min max // 350ms between requests
+    if (_queue.length) await new Promise(r => setTimeout(r, 1100)); // ~55 req/min, safely under free-tier 100/min
   }
   _running = false;
 };
@@ -91,27 +91,27 @@ const computeMetrics = (coins) => {
 };
 
 // ── Exports ───────────────────────────────────────────────────────────────
-const getMarkets = (limit = 50) => cached(`markets_${limit}`, 180_000, async () => {
+const getMarkets = (limit = 50) => cached(`markets_${limit}`, 300_000, async () => {
   const coins = await retry(() => enqueue(() => get(
     `${BASE}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${limit}&page=1&sparkline=true&price_change_percentage=1h,24h,7d`
-    , 120_000
+    , 180_000
   )));
   return computeMetrics(coins);
 });
 
-const getGlobal = () => cached('global', 300_000, () =>
-  retry(() => enqueue(() => get(`${BASE}/global`, 180_000).then(r => r.data))));
+const getGlobal = () => cached('global', 600_000, () =>
+  retry(() => enqueue(() => get(`${BASE}/global`, 300_000).then(r => r.data))));
 
-const getTrending = () => cached('trending', 300_000, () =>
+const getTrending = () => cached('trending', 600_000, () =>
   retry(() => enqueue(() => get(`${BASE}/search/trending`, 600_000))));
 
-const getCoinDetail = (id) =>
-  retry(() => enqueue(() => get(`${BASE}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false`, 60_000)));
+const getCoinDetail = (id) => cached(`coin_${id}`, 120_000, () =>
+  retry(() => enqueue(() => get(`${BASE}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false`, 120_000))));
 
-const getOHLC = (id, days = 7) => cached(`ohlc_${id}_${days}`, 300_000, () =>
-  retry(() => enqueue(() => get(`${BASE}/coins/${id}/ohlc?vs_currency=usd&days=${days}`, 120_000))));
+const getOHLC = (id, days = 7) => cached(`ohlc_${id}_${days}`, 600_000, () =>
+  retry(() => enqueue(() => get(`${BASE}/coins/${id}/ohlc?vs_currency=usd&days=${days}`, 300_000))));
 
-const getPriceHistory = (id, days = 30) => cached(`history_${id}_${days}`, 300_000, () =>
-  retry(() => enqueue(() => get(`${BASE}/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=daily`, 120_000))));
+const getPriceHistory = (id, days = 30) => cached(`history_${id}_${days}`, 600_000, () =>
+  retry(() => enqueue(() => get(`${BASE}/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=daily`, 300_000))));
 
 module.exports = { getMarkets, getGlobal, getTrending, getCoinDetail, getOHLC, getPriceHistory };

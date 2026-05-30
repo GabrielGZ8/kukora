@@ -15,7 +15,7 @@ const express = require('express');
 const router  = express.Router();
 
 const { getOrderBooks, isWsConnected, wsStatus } = require('./exchangeService');
-const { detectOpportunities, executeSimulated }  = require('./arbitrageEngine');
+const { detectOpportunities, executeSimulated, getDailyPnl, addDailyPnl, isDailyLossBreached, resetDailyPnl } = require('./arbitrageEngine');
 const { getBalances, applyTrade, resetBalances, getTradeHistory, getPnL } = require('./walletManager');
 
 // ─── Estado del bot ────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ function appendEquityPoint(trade) {
     ts:     trade.ts,
     pnl:    cum,
     profit: +(trade.netProfit || 0).toFixed(4),
-    label:  `${trade.buyExchange[0]}→trade.sellExchange[0]}`,
+    label:  `${trade.buyExchange[0]}→${trade.sellExchange[0]}`,
   });
   if (_equityCurve.length > 500) _equityCurve = _equityCurve.slice(-500);
 }
@@ -99,8 +99,15 @@ async function arbitrageLoop() {
 
   const run = async () => {
     try {
-      const orderBooks = await getOrderBooks();
-      const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
+      let orderBooks = [];
+      try { orderBooks = await getOrderBooks(); } catch (e) { console.warn('[arb loop] getOrderBooks:', e.message); return; }
+
+      let opportunities = [], triangularSignal = null;
+      try {
+        const det = detectOpportunities(orderBooks);
+        opportunities    = det.opportunities;
+        triangularSignal = det.triangularSignal;
+      } catch (e) { console.warn('[arb loop] detectOpportunities:', e.message); }
       let lastTrade = null;
 
       const now = Date.now();
@@ -111,7 +118,7 @@ async function arbitrageLoop() {
           if (!op.liquidityOk) return false;
           if (op.score < minScore) return false;
 
-          const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(0)}-${op.sellPrice.toFixed(0)}-${op.spreadPct.toFixed(2)}`;
+          const fp = `${op.buyExchange}-${op.sellExchange}-${op.buyPrice.toFixed(1)}-${op.sellPrice.toFixed(1)}-${op.spreadPct.toFixed(3)}`;
           const lastSeen = recentFingerprints.get(fp);
           if (lastSeen && Date.now() - lastSeen < FINGERPRINT_TTL) return false;
 
@@ -134,6 +141,7 @@ async function arbitrageLoop() {
               lastTrade  = applyResult.trade;
               lastExecTs = now;
               appendEquityPoint(applyResult.trade);
+              addDailyPnl(applyResult.trade.netProfit || 0);
 
               pushToClients(alertsClients, {
                 type:  'arb_trade',
@@ -161,6 +169,8 @@ async function arbitrageLoop() {
           lastTrade,
           wallets:         getBalances(),
           pnl:             getPnL(bestAskPrice),
+          dailyPnl:        getDailyPnl(),
+          dailyLossBreached: isDailyLossBreached(),
           ...(_tickCount % 5 === 0 && { history: getTradeHistory().slice(-20).reverse() }),
           ...(lastTrade || _tickCount % 10 === 0 ? { equityCurve: _equityCurve.slice(-100) } : {}),
           ts:              new Date().toISOString(),
@@ -192,26 +202,45 @@ function sseSetup(req, res) {
 
 // ─── GET /api/arbitrage/stream ─────────────────────────────────────────────
 router.get('/stream', async (req, res) => {
+  // SSE must never return a 500 — once headers are flushed the connection is open.
+  // We send a safe init payload even if order books have errors.
   sseSetup(req, res);
   const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
   sseClients.add(res);
 
   try {
-    const orderBooks = await getOrderBooks();
-    const { opportunities, triangularSignal } = detectOpportunities(orderBooks);
+    let orderBooks = [], opportunities = [], triangularSignal = null;
+    try {
+      orderBooks = await getOrderBooks();
+      const det = detectOpportunities(orderBooks);
+      opportunities    = det.opportunities;
+      triangularSignal = det.triangularSignal;
+    } catch (e) {
+      console.error('[stream init] getOrderBooks/detectOpportunities error:', e.message);
+    }
     const bestAskPrice = getBestAskPrice(orderBooks);
+    let pnlData = { totalPnl: 0, realizedPnl: 0, unrealizedPnl: 0, totalTrades: 0, winRate: 0 };
+    try { pnlData = getPnL(bestAskPrice); } catch {}
+    let walletData = {};
+    try { walletData = getBalances(); } catch {}
     res.write(`data: ${JSON.stringify({
       type: 'init', botEnabled, minScore,
       uptimeMs: Date.now() - botStarted,
       wsStatus: wsStatus(),
       orderBooks, opportunities, triangularSignal,
-      wallets:     getBalances(),
-      pnl:         getPnL(bestAskPrice),
+      wallets:     walletData,
+      pnl:         pnlData,
+      dailyPnl:    getDailyPnl(),
+      dailyLossBreached: isDailyLossBreached(),
       history:     getTradeHistory().slice(-20).reverse(),
       equityCurve: _equityCurve.slice(-100),
       ts:          new Date().toISOString(),
     })}\n\n`);
-  } catch {}
+  } catch (e) {
+    // Last-resort: even if JSON serialization fails, keep connection alive
+    console.error('[stream init] fatal:', e.message);
+    res.write(`data: ${JSON.stringify({ type: 'init', error: e.message, botEnabled, wsStatus: wsStatus(), orderBooks: [], opportunities: [], wallets: {}, pnl: {}, ts: new Date().toISOString() })}\n\n`);
+  }
 
   req.on('close', () => { sseClients.delete(res); clearInterval(hb); });
 });
@@ -269,13 +298,22 @@ router.post('/bot', (req, res) => {
 });
 
 // ─── POST /api/arbitrage/reset ─────────────────────────────────────────────
+// Protected: requires X-Admin-Token header matching ADMIN_TOKEN env var
 router.post('/reset', (req, res) => {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (adminToken) {
+    const provided = req.headers['x-admin-token'] || req.body?.adminToken;
+    if (provided !== adminToken) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized: invalid or missing X-Admin-Token' });
+    }
+  }
   try {
     resetBalances();
+    resetDailyPnl();
     _equityCurve = [];
     _tickCount   = 0;
     botStarted   = Date.now();
-    pushToClients(sseClients, { type: 'reset', wallets: getBalances(), pnl: getPnL(), equityCurve: [] });
+    pushToClients(sseClients, { type: 'reset', wallets: getBalances(), pnl: getPnL(), equityCurve: [], dailyPnl: 0, dailyLossBreached: false });
     res.json({ ok: true, data: getBalances() });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -297,18 +335,19 @@ router.get('/wallets', (req, res) => {
 // ─── GET /api/arbitrage/stats ──────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
-    const orderBooks = await getOrderBooks().catch(() => []);
+    const orderBooks   = await getOrderBooks().catch(() => []);
     const bestAskPrice = getBestAskPrice(orderBooks);
-    const history = getTradeHistory();
-    const pairStats = {};
-    history.forEach(t => {
-      const key = `${t.buyExchange}→${t.sellExchange}`;
-      if (!pairStats[key]) pairStats[key] = { count: 0, totalPnl: 0, wins: 0 };
-      pairStats[key].count++;
-      pairStats[key].totalPnl += t.netProfit || 0;
-      if ((t.netProfit || 0) > 0) pairStats[key].wins++;
-    });
-    res.json({ ok: true, data: { ...getPnL(bestAskPrice), botEnabled, minScore, wsStatus: wsStatus(), uptimeMs: Date.now() - botStarted, pairStats, equityCurve: _equityCurve } });
+    // getPnL already computes pairStats correctly (trading fees only, no double-count)
+    const pnlData = getPnL(bestAskPrice);
+    res.json({ ok: true, data: {
+      ...pnlData,
+      botEnabled, minScore,
+      wsStatus:   wsStatus(),
+      uptimeMs:   Date.now() - botStarted,
+      equityCurve: _equityCurve,
+      dailyPnl:   getDailyPnl(),
+      dailyLossBreached: isDailyLossBreached(),
+    }});
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

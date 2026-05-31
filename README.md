@@ -23,7 +23,9 @@
 
 | Dashboard Principal | Analytics & Risk |
 |:---:|:---:|
-| ![Dashboard] | ![Analytics] |
+| <img width="1878" height="1016" alt="image" src="https://github.com/user-attachments/assets/03c54ec0-c8f3-4668-8ebc-61b24f4e6786" />
+ | <img width="1869" height="1026" alt="image" src="https://github.com/user-attachments/assets/156766c7-b62d-482f-89a7-71e5b6424724" />
+|
 | *Monitoreo en tiempo real y equity curve* | *Métricas cuantitativas y perfiles de riesgo* |
 
 ---

@@ -22,15 +22,17 @@ export default function AboutPage() {
           background: 'rgba(255,255,255,0.1)', borderRadius: '50%'
         }} />
 
-        <div style={{
-          width: 120, height: 120, borderRadius: '50%',
-          background: 'rgba(255,255,255,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 48, border: '4px solid rgba(255,255,255,0.4)',
-          flexShrink: 0
-        }}>
-          👨‍💻
-        </div>
+        <img
+          src="/avatar.jpg"
+          alt="Gabriel G.Z."
+          style={{
+            width: 120, height: 120, borderRadius: '50%',
+            objectFit: 'cover',
+            objectPosition: 'center top',
+            border: '4px solid rgba(255,255,255,0.4)',
+            flexShrink: 0
+          }}
+        />
 
         <div>
           <h1 style={{ margin: 0, fontSize: 32, fontWeight: 900, letterSpacing: '-0.03em' }}>Gabriel G. Z.</h1>

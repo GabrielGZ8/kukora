@@ -1,4 +1,6 @@
+
 # kukora — Bitcoin Arbitrage Intelligence Platform
+<img width="876" height="876" alt="favicon" src="https://github.com/user-attachments/assets/e5cead08-aace-4eaa-8577-72bea4626dc2" />
 
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 ![Deploy](https://img.shields.io/badge/deploy-Railway-purple)

@@ -12,7 +12,8 @@ app.set('x-powered-by', false);
 const PORT    = process.env.PORT || 5000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-app.use(helmet());
+// Desactivamos CSP para permitir carga de logos externos de criptomonedas
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // ─── CORS ─────────────────────────────────────────────────────────────────
 // In production on Railway/Render: if frontend is served from the SAME Express
@@ -44,7 +45,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
-app.use(rateLimit({ windowMs: 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
+// app.use(rateLimit({ windowMs: 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
 
 let dbConnected = false;
 if (process.env.MONGODB_URI) {

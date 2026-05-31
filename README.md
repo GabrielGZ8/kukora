@@ -38,6 +38,10 @@ Kukora monitorea 5 exchanges simultáneamente via WebSocket, detecta divergencia
 
 Todas las oportunidades detectadas y operaciones ejecutadas provienen exclusivamente de datos de mercado reales. No hay spreads sintéticos ni inyecciones artificiales.
 
+> [!NOTE] 
+> **Eficiencia del Mercado (0 Trades Realizados)**  
+> Si la demo muestra pocas o cero operaciones ejecutadas, esto **no es un error**. El mercado de Bitcoin es extremadamente eficiente en condiciones normales. Kukora computa los *maker/taker fees reales* y aplica *slippage de Order Book (L2)*. El bot no ejecutará un trade falso si la ganancia bruta no supera los "friction costs" del mundo real. Esto es comportamiento institucional genuino.
+
 ---
 
 ## Arquitectura de Detección — Event-Driven

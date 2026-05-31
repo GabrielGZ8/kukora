@@ -124,7 +124,7 @@ function calcVwapSlippage(levels, amount) {
 // ─── Binance WS ───────────────────────────────────────────────────────────
 function connectBinance() {
   const WS = getWSClass();
-  const ws = makeWS(WS, 'wss://stream.binance.com:9443/stream?streams=btcusdt@bookTicker/btcusdt@depth5@100ms');
+  const ws = makeWS(WS, 'wss://data-stream.binance.vision/stream?streams=btcusdt@bookTicker/btcusdt@depth5@100ms');
   if (!ws) return;
   _state.Binance.ws = ws;
   let ping;

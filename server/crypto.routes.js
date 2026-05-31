@@ -1,6 +1,6 @@
 const express = require('express');
-const router  = express.Router();
-const crypto  = require('./crypto.service');
+const router = express.Router();
+const crypto = require('./crypto.service');
 const { sma, ema, rsi, bollingerBands, macd, percentageChange, drawdown, detectSignals } = require('./quant');
 const analytics = require('./analytics');
 const { detectAnomalies, detectBatch } = require('./anomalyService');
@@ -16,12 +16,26 @@ const handle = (fn) => async (req, res) => {
   }
 };
 
+
+// ── Caché en memoria para CoinGecko (evita 429) ───────────────────────────
+const CACHE_TTL = 90_000; // 90 segundos
+const _cache = new Map();
+
+function cachedCall(key, fn) {
+  const hit = _cache.get(key);
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return Promise.resolve(hit.data);
+  return Promise.resolve(fn()).then(data => {
+    _cache.set(key, { data, ts: Date.now() });
+    return data;
+  });
+}
+
 // ── Existentes ────────────────────────────────────────────────────────────
-router.get('/markets',      handle(req => crypto.getMarkets(Number(req.query.limit) || 50)));
-router.get('/global',       handle(() => crypto.getGlobal()));
-router.get('/trending',     handle(() => crypto.getTrending()));
-router.get('/coin/:id',     handle(req => crypto.getCoinDetail(req.params.id)));
-router.get('/coin/:id/ohlc',    handle(req => crypto.getOHLC(req.params.id, Number(req.query.days) || 7)));
+router.get('/markets', handle(req => { const n = Number(req.query.limit) || 50; return cachedCall(`markets_${n}`, () => crypto.getMarkets(n)); }));
+router.get('/global', handle(() => cachedCall('global', () => crypto.getGlobal())));
+router.get('/trending', handle(() => cachedCall('trending', () => crypto.getTrending())));
+router.get('/coin/:id', handle(req => crypto.getCoinDetail(req.params.id)));
+router.get('/coin/:id/ohlc', handle(req => crypto.getOHLC(req.params.id, Number(req.query.days) || 7)));
 router.get('/coin/:id/history', handle(req => crypto.getPriceHistory(req.params.id, Number(req.query.days) || 30)));
 
 router.get('/coin/:id/technical', handle(async req => {
@@ -34,13 +48,13 @@ router.get('/coin/:id/technical', handle(async req => {
   const sma50 = sma(prices, Math.min(50, prices.length));
   const ema20 = ema(prices, 20);
   const rsi14 = rsi(prices, 14);
-  const bb    = bollingerBands(prices, 20, 2);
+  const bb = bollingerBands(prices, 20, 2);
   const macdResult = macd(prices);
   const dd = drawdown(prices);
   const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
-  const std  = Math.sqrt(prices.reduce((acc, v) => acc + (v - mean) ** 2, 0) / prices.length);
-  const ret  = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100;
-  const vol  = (std / mean) * 100;
+  const std = Math.sqrt(prices.reduce((acc, v) => acc + (v - mean) ** 2, 0) / prices.length);
+  const ret = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100;
+  const vol = (std / mean) * 100;
   const sharpe = vol ? (ret / vol).toFixed(2) : null;
   const timestamps = (hist.prices || []).map(([ts]) => ts);
   const indicators = { sma20, sma50, ema20, rsi: rsi14, bollinger: bb, macd: macdResult };
@@ -51,22 +65,22 @@ router.get('/coin/:id/technical', handle(async req => {
 // ── Analytics layer ───────────────────────────────────────────────────────
 // GET /api/crypto/coin/:id/analytics?days=30&window=24h
 router.get('/coin/:id/analytics', handle(async req => {
-  const days   = Number(req.query.days) || 30;
+  const days = Number(req.query.days) || 30;
   const window = req.query.window || null;
-  const hist   = await crypto.getPriceHistory(req.params.id, days);
-  let pairs    = hist.prices || [];
+  const hist = await crypto.getPriceHistory(req.params.id, days);
+  let pairs = hist.prices || [];
   if (window && analytics.WINDOWS[window]) pairs = analytics.sliceWindow(pairs, analytics.WINDOWS[window]);
   const prices = pairs.map(([, p]) => p);
   if (prices.length < 3) throw new Error('Datos insuficientes');
 
   const trend = analytics.trendDetection(prices);
-  const mom   = analytics.last(analytics.clean(analytics.momentum(prices)));
-  const vol   = analytics.last(analytics.clean(analytics.volatility(prices)));
-  const ret   = analytics.totalReturn(prices);
-  const dd    = analytics.drawdown(prices);
-  const sp    = analytics.sharpe(prices);
-  const pct   = analytics.percentageChange(prices);
-  const sma7  = analytics.sma(prices, Math.min(7,  prices.length));
+  const mom = analytics.last(analytics.clean(analytics.momentum(prices)));
+  const vol = analytics.last(analytics.clean(analytics.volatility(prices)));
+  const ret = analytics.totalReturn(prices);
+  const dd = analytics.drawdown(prices);
+  const sp = analytics.sharpe(prices);
+  const pct = analytics.percentageChange(prices);
+  const sma7 = analytics.sma(prices, Math.min(7, prices.length));
   const sma20 = analytics.sma(prices, Math.min(20, prices.length));
 
   return {
@@ -88,7 +102,7 @@ router.get('/coin/:id/anomaly', handle(async req => {
 
 // GET /api/crypto/anomalies?coins=bitcoin,ethereum,solana&days=7
 router.get('/anomalies', handle(async req => {
-  const ids  = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 8);
+  const ids = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 8);
   const days = Number(req.query.days) || 7;
   const assets = await Promise.all(
     ids.map(async id => {
@@ -104,11 +118,11 @@ router.get('/anomalies', handle(async req => {
 // ── Scoring / Ranking ─────────────────────────────────────────────────────
 // GET /api/crypto/scores?coins=bitcoin,ethereum&days=30
 router.get('/scores', handle(async req => {
-  const ids     = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin,polkadot').split(',').slice(0, 10);
-  const days    = Number(req.query.days) || 30;
+  const ids = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin,polkadot').split(',').slice(0, 10);
+  const days = Number(req.query.days) || 30;
   const weights = req.query.weights ? JSON.parse(req.query.weights) : undefined;
 
-  const mkt = await crypto.getMarkets(100);
+  const mkt = await cachedCall('markets_100', () => crypto.getMarkets(100));
   const mktMap = {};
   (mkt.coins || []).forEach(c => { mktMap[c.id] = c; });
 
@@ -128,21 +142,21 @@ router.get('/scores', handle(async req => {
 // ── Market overview (para IntelligencePage) ───────────────────────────────
 // GET /api/crypto/overview — métricas de mercado rápidas para top coins
 router.get('/overview', handle(async req => {
-  const mkt = await crypto.getMarkets(20);
+  const mkt = await cachedCall('markets_20', () => crypto.getMarkets(20));
   const coins = mkt.coins || [];
 
   const summary = coins.map(c => {
     const spark = c.sparkline_in_7d?.price || [];
     const trend = spark.length >= 30 ? analytics.trendDetection(spark) : { trend: 'sideways', label: '→ Lateral', strength: 0 };
-    const anom  = spark.length >= 5  ? detectAnomalies(spark) : { level: 'low', severityScore: 0 };
+    const anom = spark.length >= 5 ? detectAnomalies(spark) : { level: 'low', severityScore: 0 };
     return {
-      id:    c.id,
-      name:  c.name,
+      id: c.id,
+      name: c.name,
       symbol: c.symbol?.toUpperCase(),
       image: c.image,
       price: c.current_price,
       change24h: c.price_change_percentage_24h,
-      change7d:  c.price_change_percentage_7d_in_currency,
+      change7d: c.price_change_percentage_7d_in_currency,
       volume24h: c.total_volume,
       marketCap: c.market_cap,
       volatility: c.volatility_score,
@@ -155,7 +169,7 @@ router.get('/overview', handle(async req => {
   return {
     coins: summary,
     gainers: [...summary].sort((a, b) => b.change24h - a.change24h).slice(0, 5),
-    losers:  [...summary].sort((a, b) => a.change24h - b.change24h).slice(0, 5),
+    losers: [...summary].sort((a, b) => a.change24h - b.change24h).slice(0, 5),
     mostVolatile: [...summary].sort((a, b) => b.volatility - a.volatility).slice(0, 5),
     anomalous: summary.filter(c => c.anomaly.level !== 'low').sort((a, b) => b.anomaly.score - a.anomaly.score),
   };
@@ -163,7 +177,7 @@ router.get('/overview', handle(async req => {
 
 // ── Risk Engine ───────────────────────────────────────────────────────────
 const { assetRiskScore, correlationMatrix } = require('./riskEngine');
-const { ensembleForecast, backtest }        = require('./forecastService');
+const { ensembleForecast, backtest } = require('./forecastService');
 const { marketRegime, supportResistance, valueAtRisk, sortino, calmarRatio } = require('./analytics');
 
 // GET /api/crypto/coin/:id/risk?days=30
@@ -173,18 +187,18 @@ router.get('/coin/:id/risk', handle(async req => {
   const prices = (hist.prices || []).map(([, p]) => p);
   if (prices.length < 10) throw new Error('Datos insuficientes');
 
-  const risk    = assetRiskScore(prices);
-  const regime  = marketRegime(prices);
-  const sr      = supportResistance(prices);
-  const forecast= ensembleForecast(prices, 7);
-  const bt      = backtest(prices, 7);
+  const risk = assetRiskScore(prices);
+  const regime = marketRegime(prices);
+  const sr = supportResistance(prices);
+  const forecast = ensembleForecast(prices, 7);
+  const bt = backtest(prices, 7);
 
   return { id: req.params.id, days, risk, regime, supportResistance: sr, forecast, backtest: bt };
 }));
 
 // GET /api/crypto/correlation?coins=bitcoin,ethereum,solana&days=30
 router.get('/correlation', handle(async req => {
-  const ids  = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 6);
+  const ids = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 6);
   const days = Number(req.query.days) || 30;
 
   const assetsMap = {};
@@ -200,15 +214,15 @@ router.get('/correlation', handle(async req => {
 
 // GET /api/crypto/coin/:id/forecast?days=30&horizon=7
 router.get('/coin/:id/forecast', handle(async req => {
-  const days    = Number(req.query.days) || 30;
+  const days = Number(req.query.days) || 30;
   const horizon = Number(req.query.horizon) || 7;
-  const hist    = await crypto.getPriceHistory(req.params.id, days);
-  const prices  = (hist.prices || []).map(([, p]) => p);
-  const ts      = (hist.prices || []).map(([t]) => t);
+  const hist = await crypto.getPriceHistory(req.params.id, days);
+  const prices = (hist.prices || []).map(([, p]) => p);
+  const ts = (hist.prices || []).map(([t]) => t);
   if (prices.length < 15) throw new Error('Datos insuficientes');
 
   const result = ensembleForecast(prices, horizon);
-  const bt     = backtest(prices, Math.min(horizon, Math.floor(prices.length / 3)));
+  const bt = backtest(prices, Math.min(horizon, Math.floor(prices.length / 3)));
 
   return { id: req.params.id, lastPrice: prices[prices.length - 1], lastTs: ts[ts.length - 1], prices, timestamps: ts, forecast: result, backtest: bt };
 }));
@@ -218,12 +232,12 @@ const { monteCarloGBM } = require('./simulationService');
 
 // GET /api/crypto/coin/:id/montecarlo?days=30&horizon=30&simulations=500&target=50000
 router.get('/coin/:id/montecarlo', handle(async req => {
-  const days        = Number(req.query.days)        || 30;
-  const horizon     = Number(req.query.horizon)     || 30;
+  const days = Number(req.query.days) || 30;
+  const horizon = Number(req.query.horizon) || 30;
   const simulations = Math.min(Number(req.query.simulations) || 500, 1000);
-  const target      = req.query.target ? Number(req.query.target) : null;
+  const target = req.query.target ? Number(req.query.target) : null;
 
-  const hist   = await crypto.getPriceHistory(req.params.id, days);
+  const hist = await crypto.getPriceHistory(req.params.id, days);
   const prices = (hist.prices || []).map(([, p]) => p);
   if (prices.length < 10) throw new Error('Datos insuficientes');
 
@@ -254,20 +268,20 @@ const { computeKCS } = require('./kcsService');
 
 // GET /api/crypto/regime?coins=bitcoin,ethereum,solana&days=30
 router.get('/regime', handle(async req => {
-  const ids  = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 6);
+  const ids = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple').split(',').slice(0, 6);
   const days = Number(req.query.days) || 30;
 
   const assetsData = await Promise.all(ids.map(async id => {
     try {
       const h = await crypto.getPriceHistory(id, days);
-      return { id, name: id, prices: (h.prices || []).map(([,p]) => p) };
+      return { id, name: id, prices: (h.prices || []).map(([, p]) => p) };
     } catch { return { id, name: id, prices: [] }; }
   }));
 
   const batchResult = await detectMarketRegimeBatch(assetsData);
 
   // Compute KCS for the batch
-  const mkt = await crypto.getGlobal();
+  const mkt = await cachedCall('global', () => crypto.getGlobal());
   const btcDom = mkt?.market_cap_percentage?.btc || null;
   const kcs = computeKCS(assetsData, null, btcDom, null);
 
@@ -278,20 +292,20 @@ router.get('/regime', handle(async req => {
 router.get('/coin/:id/regime', handle(async req => {
   const days = Number(req.query.days) || 30;
   const hist = await crypto.getPriceHistory(req.params.id, days);
-  const prices = (hist.prices || []).map(([,p]) => p);
+  const prices = (hist.prices || []).map(([, p]) => p);
   return { id: req.params.id, regime: detectMarketRegime(prices), days };
 }));
 
 // GET /api/crypto/kcs?coins=bitcoin,ethereum,solana&days=30
 router.get('/kcs', handle(async req => {
-  const ids  = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin').split(',').slice(0, 8);
+  const ids = (req.query.coins || 'bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin').split(',').slice(0, 8);
   const days = Number(req.query.days) || 30;
 
   const [assetsData, mkt] = await Promise.all([
     Promise.all(ids.map(async id => {
       try {
         const h = await crypto.getPriceHistory(id, days);
-        return { id, prices: (h.prices || []).map(([,p]) => p) };
+        return { id, prices: (h.prices || []).map(([, p]) => p) };
       } catch { return { id, prices: [] }; }
     })),
     crypto.getGlobal().catch(() => null),
@@ -306,13 +320,13 @@ const { runBacktest, runAllStrategies } = require('./backtestEngine');
 
 // GET /api/crypto/coin/:id/backtest?days=90&strategy=sma_crossover
 router.get('/coin/:id/backtest', handle(async req => {
-  const days     = Number(req.query.days) || 90;
+  const days = Number(req.query.days) || 90;
   const strategy = req.query.strategy || 'sma_crossover';
-  const all      = req.query.all === 'true';
+  const all = req.query.all === 'true';
 
-  const hist   = await crypto.getPriceHistory(req.params.id, days);
+  const hist = await crypto.getPriceHistory(req.params.id, days);
   const prices = (hist.prices || []).map(([, p]) => p);
-  const ts     = (hist.prices || []).map(([t]) => t);
+  const ts = (hist.prices || []).map(([t]) => t);
   if (prices.length < 35) throw new Error('Se necesitan más datos (mínimo 35 días)');
 
   const result = all ? runAllStrategies(prices) : runBacktest(prices, strategy);

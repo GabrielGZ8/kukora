@@ -11,7 +11,20 @@
 
 ## 🚀 Live Demo
 
-**URL:** https://kukora.up.railway.app
+**URL:** [https://kukora-production.up.railway.app/arbitrage](https://kukora-production.up.railway.app/arbitrage)
+**Admin Reset:** Requiere `ADMIN_TOKEN` en headers.
+
+## 📸 Preview
+
+> [!TIP]
+> Aquí puedes ver el sistema operando en tiempo real con 5 exchanges simultáneos.
+
+| Dashboard Principal | Analytics & Risk |
+|:---:|:---:|
+| ![Dashboard] | ![Analytics] |
+| *Monitoreo en tiempo real y equity curve* | *Métricas cuantitativas y perfiles de riesgo* |
+
+---
 
 ---
 
@@ -171,6 +184,31 @@ El sistema evalúa también rutas de 3 exchanges (`A → B → C`) buscando opor
 ```
 netPct = ((1 + s1) × (1 + s2) − 1) × 100 − feesPct − slippageFallback
 ```
+
+---
+
+## 🧭 Guía de Funcionalidades (Tour por Kukora)
+
+Kukora no es solo un bot de ejecución; es un sistema de inteligencia de mercado completo de 20 páginas:
+
+### 1. 🤖 Arbitraje Live (Core)
+*   **Monitoreo 5x**: Vista consolidada de 5 exchanges con latencia real (WS vs HTTP).
+*   **Audit Modal**: Haz clic en cualquier trade para ver el desglose matemático: bruto, neto, fees detallados y método de slippage usado.
+*   **Filtros Inteligentes**: Ajusta el `Score Mínimo` en tiempo real para filtrar ruido de mercado.
+
+### 2. 🧠 Intelligence & Analytics
+*   **Predictive Ranking**: Algoritmo que predice qué pares son más propensos a abrir oportunidades basándose en volatilidad histórica.
+*   **Market Regime**: Clasificación automática del entorno (Trending, Ranging, Volatile) para ajustar la agresividad.
+*   **Fill Probability**: Probabilidad estadística de que una orden se complete basada en la profundidad del libro.
+
+### 3. 🛡️ Risk Management
+*   **Risk Engine**: Reportes detallados por asset con métricas VaR (Value at Risk), Sharpe, Sortino y correlación de Pearson.
+*   **Circuit Breakers**: Visualiza qué controles de riesgo están deteniendo operaciones (Liquidez insuficiente, Spread inconsistente, etc).
+
+### 4. 📊 Portfolio & Backtest
+*   **Equity Curve**: Seguimiento en tiempo real de la rentabilidad acumulada.
+*   **Monte Carlo Simulation**: Proyección de escenarios de riesgo para el portafolio basado en caminata aleatoria.
+*   **Correlation Galaxy**: Mapa visual de interdependencia entre activos para evitar sobre-exposición.
 
 ---
 

@@ -348,7 +348,7 @@ export default function Layout() {
               letterSpacing: '0.08em', textTransform: 'uppercase', lineHeight: 1, marginTop: 2,
               whiteSpace: 'nowrap',
             }}>
-              Quantitative Crypto
+              Mercado Cripto
             </div>
           </div>
         </div>

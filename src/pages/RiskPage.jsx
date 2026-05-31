@@ -301,7 +301,7 @@ ${risk.risk?.grade === 'A' ? 'Riesgo BAJO. Volatilidad controlada. Adecuado para
   'Riesgo MUY ALTO. Máxima precaución, posición reducida.'}
 
 ─────────────────────────────────
-Generado por kukora · Quantitative Crypto`}
+Generado por kukora · Mercado Cripto`}
             </pre>
             <div style={{ display:'flex', gap:8, marginTop:16, justifyContent:'flex-end' }}>
               <button className="btn btn-secondary btn-sm"

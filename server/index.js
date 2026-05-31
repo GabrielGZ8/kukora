@@ -44,7 +44,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
-app.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
+app.use(rateLimit({ windowMs: 60_000, max: 1000, standardHeaders: true, legacyHeaders: false }));
 
 let dbConnected = false;
 if (process.env.MONGODB_URI) {

@@ -74,14 +74,18 @@ function getBalances() {
 }
 
 /**
- * calcWithdrawalFee — computes periodic rebalancing cost (informational only)
- * Not deducted per trade in pre-funded bilateral model
+ * calcWithdrawalFee — computes periodic rebalancing cost (informational only).
+ * Models a symmetric round-trip: BTC moves from buy→sell exchange,
+ * USDT moves from sell→buy exchange. Amortized as average of both directional fees.
+ * Not deducted per trade in pre-funded bilateral model.
  */
 function calcWithdrawalFee(buyExchange, sellExchange, amount, buyPrice) {
   const buyFee  = WITHDRAWAL_FEES[buyExchange]  || { BTC: 0.0003, USDT: 6 };
   const sellFee = WITHDRAWAL_FEES[sellExchange] || { BTC: 0.0003, USDT: 6 };
-  const btcWithdrawal  = buyFee.BTC * buyPrice;
-  const usdtWithdrawal = sellFee.USDT;
+  // Round-trip: BTC withdrawal from buy exchange + BTC withdrawal from sell exchange (average)
+  const btcWithdrawal  = ((buyFee.BTC + sellFee.BTC) / 2) * buyPrice;
+  // Round-trip: USDT withdrawal from sell exchange + USDT withdrawal from buy exchange (average)
+  const usdtWithdrawal = (buyFee.USDT + sellFee.USDT) / 2;
   return {
     btcWithdrawalUSD:  +btcWithdrawal.toFixed(4),
     usdtWithdrawalUSD: +usdtWithdrawal.toFixed(4),

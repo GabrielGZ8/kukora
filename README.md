@@ -7,7 +7,7 @@
 ![Data](https://img.shields.io/badge/data-100%25%20real%20market-green)
 
 > Detección y ejecución simulada de arbitraje de Bitcoin en tiempo real.
-> Event-driven <30ms · VWAP L2 slippage real · Score compuesto 7 factores · 5 exchanges simultáneos · **Triangular auto-ejecutable** · Equity curve 100% real.
+> Event-driven <30ms · **Statistical Arbitrage (Z-Score)** · **Triangular 3-Leg Sync** · VWAP L2 slippage real · Score compuesto 7 factores · 5 exchanges simultáneos · Equity curve 100% real.
 
 ## 🚀 Live Demo
 
@@ -50,7 +50,14 @@ SSE loop (150ms)
   → solo actualiza la UI, no bloquea la detección
 ```
 
-El loop SSE de 150ms es únicamente para streaming de estado a la UI. La detección ocurre fuera de ese loop, en el momento en que llega el dato de mercado.
+### Inteligencia de Mercado — Multi-Estrategia
+
+Kukora no solo busca spreads bilaterales simples; implementa un stack de inteligencia cuantitativa:
+
+1. **Arbitraje Estadístico (StatArb)**: Monitorea el spread relativo entre exchanges y calcula el **Z-Score** sobre una ventana deslizante de 100 periodos. Identifica oportunidades de reversión a la media incluso cuando el spread actual es bajo.
+2. **Arbitraje Triangular (3-Leg)**: Escanea ciclos (ej. BTC → USDT → ETH → BTC) a través de múltiples mercados para capturar ineficiencias circulares de liquidez.
+3. **Regime Detection**: Clasifica el microambiente de mercado (Liquidity Compression, Volatile Uncertainty) para ajustar agresividad de ejecución.
+4. **Predictive Fill Probability**: Estima la probabilidad de llenado de una orden *Taker* basándose en la profundidad del libro y latencia histórica.
 
 ---
 

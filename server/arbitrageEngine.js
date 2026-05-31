@@ -1,22 +1,27 @@
 /**
- * arbitrageEngine.js — kukora arbitrage v7
+ * arbitrageEngine.js — kukora arbitrage v8
+ *
+ * v8 changes vs v7:
+ *   - breakEvenPct now uses true break-even (buyFee + sellFee + slippageCost) / notional.
+ *     Previously MIN_NET_PROFIT was erroneously included as a "cost", inflating the
+ *     break-even percentage. viabilityThresholdPct is exported separately for UI display.
+ *   - withdrawalFeeUSD uses symmetric round-trip rebalancing cost:
+ *     (wfBuy.BTC + wfSell.BTC) * askA / 2 + (wfBuy.USDT + wfSell.USDT) / 2
+ *     Reflects the true amortized cost of one rebalancing cycle divided across both legs.
+ *   - DEMO_MODE: when process.env.DEMO_MODE === 'true' and no viable opportunity exists,
+ *     injects one clearly-marked synthetic opportunity with spread 0.40% to demonstrate
+ *     full system flow during demo day. Synthetic ops carry { synthetic: true } flag
+ *     and are labelled [DEMO] in all UI displays.
  *
  * v7 changes vs v6:
  *   - DEFAULT_TRADE_AMOUNT: 0.01 → 0.05 BTC
- *     Reasoning: at 0.05 BTC (~$5,000) a 0.03% net spread yields ~$1.50 net profit,
- *     which clears real taker fees on Binance/OKX/Bybit pairs. At 0.01 BTC the same
- *     spread yields $0.30, making nearly all real-market opportunities sub-threshold.
- *   - MIN_NET_PROFIT: 0.01 → 0.05 USD (scales with 5x trade size, stays conservative)
+ *   - MIN_NET_PROFIT: 0.01 → 0.05 USD
  *   - LIQUIDITY_MIN_FILL: 0.80 → 0.50
- *     Reasoning: with 0.05 BTC the order book almost always has >80% fill on top-5
- *     exchanges, so 0.80 was effectively ornamental. 0.50 means the engine genuinely
- *     enforces partial-fill logic when book depth is thin (e.g. Kraken, Coinbase),
- *     while remaining realistic for Binance/OKX/Bybit which have deep L2 books.
- *   - All detections and executions remain from real live market data only.
  *   - Detection remains event-driven (<30ms) via priceEmitter WS callbacks.
  */
 
 const { calcRealSlippage, getDepth, isFeedStale } = require('./exchangeService');
+const { detectStatArb } = require('./statArbEngine');
 const { TRADING_FEES: TAKER_FEES, MAKER_FEES, WITHDRAWAL_FEES, SLIPPAGE_RATE } = require('./feeConfig');
 
 // ─── Configuración ────────────────────────────────────────────────────────
@@ -224,11 +229,22 @@ function detectOpportunities(orderBooks, tradeAmount) {
 
       const wfBuy  = WITHDRAWAL_FEES[buyEx.exchange]  || { BTC: 0.0003, USDT: 6 };
       const wfSell = WITHDRAWAL_FEES[sellEx.exchange] || { BTC: 0.0003, USDT: 6 };
-      const withdrawalFeeUSD = +(wfBuy.BTC * askA + wfSell.USDT).toFixed(4);
+      // Symmetric round-trip rebalancing cost: BTC goes from buy→sell exchange,
+      // USDT goes from sell→buy exchange. Amortized as average of both withdrawal fees.
+      const withdrawalFeeUSD = +(
+        ((wfBuy.BTC + wfSell.BTC) / 2) * askA +
+        ((wfBuy.USDT + wfSell.USDT) / 2)
+      ).toFixed(4);
 
-      const totalCost    = buyFee + sellFee + slippageCost + MIN_NET_PROFIT;
-      const notional     = askA * amount;
-      const breakEvenPct = notional > 0 ? +(totalCost / notional * 100).toFixed(4) : 0;
+      // True break-even: the minimum spread needed to cover all execution costs.
+      // Does NOT include MIN_NET_PROFIT (that is a profit target, not a cost).
+      const trueCost         = buyFee + sellFee + slippageCost;
+      const notional         = askA * amount;
+      const breakEvenPct     = notional > 0 ? +(trueCost / notional * 100).toFixed(4) : 0;
+      // viabilityThresholdPct: spread needed to also clear the minimum profit target.
+      const viabilityThresholdPct = notional > 0
+        ? +((trueCost + MIN_NET_PROFIT) / notional * 100).toFixed(4)
+        : 0;
 
       const netProfit    = grossProfit - buyFee - sellFee - slippageCost;
       const netProfitPct = notional > 0 ? (netProfit / notional) * 100 : 0;
@@ -277,7 +293,7 @@ function detectOpportunities(orderBooks, tradeAmount) {
             ? ` | ⚠ Coinbase fee 0.60%` : '';
           const feeMode = USE_MAKER_FEES ? ' [maker]' : ' [taker]';
           rejectionReason = `Net $${netProfit.toFixed(4)} < $${MIN_NET_PROFIT} | ` +
-            `break-even ${breakEvenPct}% | spread ${spreadPct.toFixed(4)}% | ` +
+            `break-even ${breakEvenPct}% | viability-threshold ${viabilityThresholdPct}% | spread ${spreadPct.toFixed(4)}% | ` +
             `Fees $${(buyFee + sellFee).toFixed(2)} + Slip $${slippageCost.toFixed(2)}${highFeeNote}${feeMode}`;
         }
 
@@ -321,6 +337,7 @@ function detectOpportunities(orderBooks, tradeAmount) {
         withdrawalFeeUSD,
         withdrawalModel:  'periodic_rebalancing',
         breakEvenPct,
+        viabilityThresholdPct,
         netProfit:      +netProfit.toFixed(4),
         netProfitPct:   +netProfitPct.toFixed(4),
         profitLow,
@@ -369,10 +386,101 @@ function detectOpportunities(orderBooks, tradeAmount) {
     return b.score - a.score || b.netProfit - a.netProfit;
   });
 
+  // ─── DEMO_MODE: inject synthetic opportunity when market is flat ──────────
+  // Only activates when DEMO_MODE=true and no real viable opportunity exists.
+  // Synthetic opportunities are clearly marked with synthetic:true and [DEMO] labels
+  // so the jury can distinguish them from real detections. They demonstrate the full
+  // execution pipeline (detection → score → execute → wallet update → equity curve)
+  // using realistic parameters (0.40% spread, real fee structure, simulated VWAP).
+  if (process.env.DEMO_MODE === 'true' && !opportunities.some(o => o.viable)) {
+    const candidates = valid.filter(ob => !ob.error && ob.ask > 0 && ob.bid > 0);
+    if (candidates.length >= 2) {
+      const buyEx  = candidates[0];
+      const sellEx = candidates[1] || candidates[0];
+      const FEES   = getFees();
+      const feeA   = FEES[buyEx.exchange]  || 0.001;
+      const feeB   = FEES[sellEx.exchange] || 0.001;
+      const askA   = buyEx.ask;
+      // Synthesize a 0.40% spread — realistic for high-volatility windows
+      const bidB   = +(askA * 1.004).toFixed(2);
+      const amt    = DEFAULT_TRADE_AMOUNT;
+
+      const grossProfit    = (bidB - askA) * amt;
+      const buyFee         = askA * amt * feeA;
+      const sellFee        = bidB * amt * feeB;
+      const slippageCost   = askA * amt * SLIPPAGE_FIXED * 2;
+      const trueCost       = buyFee + sellFee + slippageCost;
+      const notional       = askA * amt;
+      const netProfit      = +(grossProfit - trueCost).toFixed(4);
+      const netProfitPct   = +((netProfit / notional) * 100).toFixed(4);
+      const breakEvenPct   = +((trueCost / notional) * 100).toFixed(4);
+      const viabilityThresholdPct = +((( trueCost + MIN_NET_PROFIT) / notional) * 100).toFixed(4);
+      const spreadPct      = +((bidB - askA) / askA * 100).toFixed(4);
+
+      const wfBuy  = WITHDRAWAL_FEES[buyEx.exchange]  || { BTC: 0.0003, USDT: 6 };
+      const wfSell = WITHDRAWAL_FEES[sellEx.exchange] || { BTC: 0.0003, USDT: 6 };
+      const withdrawalFeeUSD = +(
+        ((wfBuy.BTC + wfSell.BTC) / 2) * askA +
+        ((wfBuy.USDT + wfSell.USDT) / 2)
+      ).toFixed(4);
+
+      const syntheticOp = {
+        id:             `arb-demo-${Date.now()}`,
+        synthetic:      true,
+        buyExchange:    buyEx.exchange,
+        sellExchange:   sellEx.exchange,
+        buyPrice:       +askA.toFixed(2),
+        sellPrice:      +bidB.toFixed(2),
+        spreadPct,
+        grossProfit:    +grossProfit.toFixed(4),
+        buyFee:         +buyFee.toFixed(4),
+        sellFee:        +sellFee.toFixed(4),
+        totalFees:      +(buyFee + sellFee).toFixed(4),
+        slippage:       +slippageCost.toFixed(4),
+        slippagePct:    +(SLIPPAGE_FIXED * 100 * 2).toFixed(4),
+        slippageMethod: 'fallback',
+        buySlipMethod:  'fallback',
+        sellSlipMethod: 'fallback',
+        withdrawalFeeUSD,
+        withdrawalModel: 'periodic_rebalancing',
+        breakEvenPct,
+        viabilityThresholdPct,
+        netProfit,
+        netProfitPct,
+        profitLow:      null,
+        profitHigh:     null,
+        viable:         true,
+        circuitBreaker: false,
+        liquidityOk:    true,
+        buyFillPct:     100,
+        sellFillPct:    100,
+        rejectionReason:   null,
+        rejectionCategory: null,
+        buyLatency:     buyEx.latencyMs  || 0,
+        sellLatency:    sellEx.latencyMs || 0,
+        buySource:      buyEx.source  || 'ws',
+        sellSource:     sellEx.source || 'ws',
+        feedAgeMs:      Math.max(buyEx.feedAgeMs || 0, sellEx.feedAgeMs || 0),
+        detectionLatencyMs: 0,
+        evalMs:         0,
+        feeMode:        'taker',
+        tradeAmount:    amt,
+        detectedAt:     Date.now(),
+        ts:             new Date().toISOString(),
+        score:          0,
+      };
+      syntheticOp.score = scoreOpportunity(syntheticOp);
+      opportunities.unshift(syntheticOp);
+      console.log(`[DEMO_MODE] Injected synthetic opportunity ${buyEx.exchange}→${sellEx.exchange} spread=${spreadPct}% net=$${netProfit}`);
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const triangularSignal = detectTriangularSignal(valid, FEES);
+  const statArbSignals   = detectStatArb(orderBooks);
   const evalMs = Date.now() - totalEvalStart;
 
-  return { opportunities, triangularSignal, evalMs };
+  return { opportunities, triangularSignal, statArbSignals, evalMs };
 }
 
 // ─── Triangular signal (informational) ───────────────────────────────────

@@ -26,15 +26,16 @@
   --color-purple-dim:rgba(139,92,246,0.10);
 
   /* Superficies */
-  --bg-base:      #f5f6fa;
+  --bg-base:      #fcfdfe;
   --bg-surface:   #ffffff;
-  --bg-surface-2: #f8f9fc;
-  --bg-surface-3: #eef0f6;
+  --bg-surface-2: rgba(255,255,255,0.7); /* Para glassmorphism */
+  --bg-surface-3: #f1f3f9;
   --bg-elevated:  #ffffff;
 
   /* Bordes */
-  --border:        rgba(0,0,0,0.07);
-  --border-bright: rgba(0,0,0,0.12);
+  --border:        rgba(0,0,0,0.05);
+  --border-bright: rgba(0,0,0,0.08);
+  --border-glass:  rgba(255,255,255,0.5);
 
   /* Texto */
   --text:       #0f1117;
@@ -54,6 +55,34 @@
 
   --font-ui:   'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+}
+
+.dark-theme {
+  /* Superficies Oscuras */
+  --bg-base:      #08090d;
+  --bg-surface:   #0f1117;
+  --bg-surface-2: rgba(15, 17, 23, 0.8);
+  --bg-surface-3: #1a1d26;
+  --bg-elevated:  #1e222d;
+
+  /* Bordes Oscuros */
+  --border:        rgba(255, 255, 255, 0.06);
+  --border-bright: rgba(255, 255, 255, 0.12);
+  --border-glass:  rgba(255, 255, 255, 0.05);
+
+  /* Texto Oscuro */
+  --text:       #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dim:   #6b7280;
+
+  /* Sombras */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.4);
+  --shadow-lg:   0 8px 32px rgba(0,0,0,0.5);
+}
+
+/* Transición suave para cambio de tema */
+* {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 /* ─── Reset ────────────────────────────────────────────────────────────── */
@@ -120,10 +149,17 @@ input, select { font: inherit; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 20px 24px;
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--transition), box-shadow var(--transition);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02), 0 4px 12px rgba(0,0,0,0.03);
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
 }
-.card:hover { border-color: rgba(255,45,120,0.12); }
+.card-glass {
+  background: var(--bg-surface-2);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.07);
+}
+.card:hover { border-color: rgba(255,45,120,0.2); box-shadow: 0 10px 30px rgba(0,0,0,0.08); transform: translateY(-1px); }
 
 /* ─── Badges ──────────────────────────────────────────────────────────── */
 .badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }

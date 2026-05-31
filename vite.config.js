@@ -12,13 +12,24 @@ export default defineConfig({
         target: `http://localhost:${API_PORT}`,
         changeOrigin: true,
         ws: true,
-        // Timeout for SSE connections (0 = no timeout)
+        // Timeout 0 = sin límite para SSE (stream infinito)
         timeout: 0,
+        proxyTimeout: 0,
         configure: (proxy) => {
-          proxy.on('error', (err, _req, _res) => {
-            // Suppress noisy proxy errors during server startup
-            if (err.code !== 'ECONNREFUSED' && err.code !== 'ECONNRESET') {
-              console.error('[proxy]', err.message);
+          proxy.on('error', (err, _req, res) => {
+            // Suprimir errores de arranque (servidor aún no listo)
+            if (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET') return;
+            console.error('[proxy]', err.message);
+            // Evitar crash si la respuesta ya fue enviada
+            if (res && !res.headersSent && typeof res.writeHead === 'function') {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'Proxy error: ' + err.message }));
+            }
+          });
+          proxy.on('proxyReq', (_proxyReq, req) => {
+            // Marcar SSE para que http-proxy no cierre la conexión
+            if (req.url?.includes('stream')) {
+              _proxyReq.setHeader('Accept', 'text/event-stream');
             }
           });
         },

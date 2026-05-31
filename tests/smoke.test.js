@@ -1,16 +1,14 @@
 /**
- * smoke.test.js — kukora arbitrage bot v3
+ * smoke.test.js — kukora arbitrage bot v4
  * Run with: node tests/smoke.test.js
  * No external dependencies — Node.js built-ins + assert only
  *
- * NUEVOS TESTS v3:
- *  - No doble registro de slippage (tests 9, 10)
- *  - netProfitPct recalculado desde execAmount real (test 11)
- *  - Categorías de rechazo correctas (test 12)
- *  - Session analytics: rejectionCounts, bestOpportunitySeen, nearViableCount (test 13)
- *  - Coinbase fee penalty en score (test 14)
- *  - evalMs expuesto en detectOpportunities (test 15)
- *  - fillPct expuesto en oportunidades (test 16)
+ * NUEVOS TESTS v4:
+ *  - breakEvenPct es el break-even real (sin MIN_NET_PROFIT inflando el costo) (test 17)
+ *  - viabilityThresholdPct expuesto y > breakEvenPct (test 18)
+ *  - withdrawalFeeUSD simétrico (test 19)
+ *  - DEMO_MODE inyecta synthetic opportunity cuando no hay viable (test 20)
+ *  - synthetic opportunity tiene synthetic:true flag (test 21)
  */
 
 'use strict';
@@ -328,11 +326,109 @@ console.log('\n🔥 Kukora Smoke Tests v3\n');
     assert(_MIN_SPREAD_PCT === 0.005, `_MIN_SPREAD_PCT should be 0.005 (v7), got ${_MIN_SPREAD_PCT}`);
   });
 
+  // TEST 17: breakEvenPct es el break-even REAL (sin MIN_NET_PROFIT inflado)
+  await test('breakEvenPct — break-even real (v8): no incluye MIN_NET_PROFIT como costo', () => {
+    const { detectOpportunities, resetSessionStats } = require('../server/arbitrageEngine');
+    const { TRADING_FEES, SLIPPAGE_RATE } = require('../server/feeConfig');
+    resetSessionStats();
+    const { opportunities } = detectOpportunities(mockBooks);
+    const op = opportunities.find(o => o.viable);
+    if (op) {
+      // True break-even = (buyFee + sellFee + slippageCost) / notional
+      const notional   = op.buyPrice * op.tradeAmount;
+      const trueFees   = (op.buyFee || 0) + (op.sellFee || 0);
+      const slipCost   = op.slippage || 0;
+      const trueBE     = ((trueFees + slipCost) / notional) * 100;
+      // breakEvenPct should be close to trueBE (within floating point tolerance)
+      assert(Math.abs(op.breakEvenPct - trueBE) < 0.002,
+        `breakEvenPct ${op.breakEvenPct} should equal true break-even ${trueBE.toFixed(4)} (v8 fix)`);
+      // breakEvenPct must NOT be inflated by MIN_NET_PROFIT
+      const fakeInflated = ((trueFees + slipCost + 0.05) / notional) * 100;
+      assert(Math.abs(op.breakEvenPct - fakeInflated) > 0.0005,
+        `breakEvenPct should NOT equal the MIN_NET_PROFIT-inflated value ${fakeInflated.toFixed(4)}`);
+    }
+  });
+
+  // TEST 18: viabilityThresholdPct expuesto y mayor que breakEvenPct
+  await test('viabilityThresholdPct — expuesto y > breakEvenPct (v8)', () => {
+    const { detectOpportunities, resetSessionStats } = require('../server/arbitrageEngine');
+    resetSessionStats();
+    const { opportunities } = detectOpportunities(mockBooks);
+    const op = opportunities[0];
+    assert(op !== undefined, 'should have at least one opportunity');
+    assert(typeof op.viabilityThresholdPct === 'number', 'viabilityThresholdPct should be a number');
+    assert(op.viabilityThresholdPct >= op.breakEvenPct,
+      `viabilityThresholdPct ${op.viabilityThresholdPct} should be >= breakEvenPct ${op.breakEvenPct}`);
+  });
+
+  // TEST 19: withdrawalFeeUSD simétrico (v8)
+  await test('withdrawalFeeUSD — cálculo simétrico round-trip (v8)', () => {
+    const { detectOpportunities, resetSessionStats } = require('../server/arbitrageEngine');
+    const { WITHDRAWAL_FEES } = require('../server/feeConfig');
+    resetSessionStats();
+    const { opportunities } = detectOpportunities(mockBooks);
+    const op = opportunities[0];
+    if (op) {
+      assert(typeof op.withdrawalFeeUSD === 'number', 'withdrawalFeeUSD should be a number');
+      // Symmetric formula: average of both BTC fees + average of both USDT fees
+      const wfBuy  = WITHDRAWAL_FEES[op.buyExchange]  || { BTC: 0.0003, USDT: 6 };
+      const wfSell = WITHDRAWAL_FEES[op.sellExchange] || { BTC: 0.0003, USDT: 6 };
+      const expected = +(
+        ((wfBuy.BTC + wfSell.BTC) / 2) * op.buyPrice +
+        ((wfBuy.USDT + wfSell.USDT) / 2)
+      ).toFixed(4);
+      assert(Math.abs(op.withdrawalFeeUSD - expected) < 0.01,
+        `withdrawalFeeUSD ${op.withdrawalFeeUSD} should match symmetric formula ${expected} (v8)`);
+    }
+  });
+
+  // TEST 20: DEMO_MODE — inyecta synthetic opportunity cuando no hay viable
+  await test('DEMO_MODE — inyecta oportunidad sintética cuando mercado está plano (v8)', () => {
+    const originalDemo = process.env.DEMO_MODE;
+    process.env.DEMO_MODE = 'true';
+    // Clear module cache so engine re-reads env
+    delete require.cache[require.resolve('../server/arbitrageEngine')];
+    const { detectOpportunities, resetSessionStats } = require('../server/arbitrageEngine');
+    resetSessionStats();
+    // Use tight books — no real viable opportunity
+    const { opportunities } = detectOpportunities(tightBooks);
+    // With DEMO_MODE=true, should have at least one viable synthetic opportunity
+    const synthetic = opportunities.find(o => o.viable && o.synthetic === true);
+    assert(synthetic !== undefined, 'DEMO_MODE should inject a synthetic viable opportunity when market is flat');
+    assert(synthetic.spreadPct > 0.30, `Synthetic spread ${synthetic.spreadPct}% should be > 0.30%`);
+    assert(synthetic.netProfit > 0, `Synthetic netProfit ${synthetic.netProfit} should be positive`);
+    // Restore
+    process.env.DEMO_MODE = originalDemo || 'false';
+    delete require.cache[require.resolve('../server/arbitrageEngine')];
+    require('../server/arbitrageEngine'); // re-cache
+  });
+
+  // TEST 21: synthetic opportunity tiene synthetic:true y viable:true
+  await test('DEMO_MODE — synthetic opportunity marcada correctamente (v8)', () => {
+    const originalDemo = process.env.DEMO_MODE;
+    process.env.DEMO_MODE = 'true';
+    delete require.cache[require.resolve('../server/arbitrageEngine')];
+    const { detectOpportunities, resetSessionStats } = require('../server/arbitrageEngine');
+    resetSessionStats();
+    const { opportunities } = detectOpportunities(tightBooks);
+    const synthetic = opportunities.find(o => o.synthetic);
+    if (synthetic) {
+      assert.strictEqual(synthetic.synthetic,      true,     'synthetic flag should be true');
+      assert.strictEqual(synthetic.viable,         true,     'synthetic op should be viable');
+      assert(synthetic.score >= 1 && synthetic.score <= 100, `synthetic score ${synthetic.score} should be in [1,100]`);
+      assert(synthetic.withdrawalModel === 'periodic_rebalancing', 'should have correct withdrawal model');
+      assert(typeof synthetic.viabilityThresholdPct === 'number', 'should have viabilityThresholdPct');
+    }
+    process.env.DEMO_MODE = originalDemo || 'false';
+    delete require.cache[require.resolve('../server/arbitrageEngine')];
+    require('../server/arbitrageEngine');
+  });
+
   // ─── Summary ──────────────────────────────────────────────────────────
   console.log('');
   if (failed === 0) {
     console.log(`✅ All ${passed} tests passed — Kukora smoke test OK`);
-    console.log('   Sistema listo para demo day.\n');
+    console.log('   Sistema listo para demo day (v8).\n');
   } else {
     console.log(`❌ ${failed} test(s) FAILED, ${passed} passed`);
     console.log('   Revisar errores arriba antes del demo day.\n');

@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import ExecutiveDashboard from '../components/common/ExecutiveDashboard';
 import LifecyclePanel from '../components/common/LifecyclePanel';
 import IntelligencePanel from '../components/common/IntelligencePanel';
+import TradeAuditModal from '../components/common/TradeAuditModal';
 
 const fmt    = (n, d=2)  => (n==null||isNaN(n)) ? '—' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtP   = (n, d=4)  => (n==null||isNaN(n)) ? '—' : `$${Number(n).toFixed(d)}`;
@@ -46,13 +47,12 @@ const latLabel   = ms => ms===0?'WS':`${ms}ms`;
 const ALL_EXCHANGES = ['Binance','Kraken','Bybit','OKX','Coinbase'];
 
 // ─── Shared components ────────────────────────────────────────────────────
-function Card({ children, style, glow }) {
+function Card({ children, style, glow, glass }) {
   return (
-    <div style={{
-      background: 'var(--bg-surface)', border: `1px solid ${glow ? 'rgba(0,184,122,0.40)' : 'var(--border)'}`,
-      borderRadius: 'var(--radius-lg)', boxShadow: glow ? '0 0 24px rgba(0,184,122,0.12), var(--shadow-card)' : 'var(--shadow-card)',
-      transition: 'border-color 0.3s, box-shadow 0.3s',
+    <div className={glass ? 'card-glass' : 'card'} style={{
       ...style,
+      borderColor: glow ? 'rgba(0,184,122,0.40)' : 'var(--border)',
+      boxShadow: glow ? '0 0 24px rgba(0,184,122,0.12), 0 4px 12px rgba(0,0,0,0.03)' : undefined,
     }}>{children}</div>
   );
 }
@@ -181,7 +181,14 @@ function OpportunityHero({ op, minScore, rank }) {
         <span style={{ color:'var(--text-dim)' }}>Slip: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>-${fmt(op.slippage,4)}</span></span>
         <span style={{ color:'var(--text-dim)' }}>Spread: <span style={{ fontFamily:'var(--font-mono)' }}>{op.spreadPct?.toFixed(3)||'—'}%</span></span>
         {op.breakEvenPct != null && (
-          <span style={{ color:'var(--text-dim)' }}>Break-even: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-yellow)' }}>{op.breakEvenPct}%</span></span>
+          <span title="Spread mínimo para cubrir fees + slippage (break-even real, sin margen de ganancia)" style={{ color:'var(--text-dim)' }}>
+            Break-even: <span style={{ fontFamily:'var(--font-mono)', color:'var(--color-yellow)' }}>{op.breakEvenPct}%</span>
+          </span>
+        )}
+        {op.viabilityThresholdPct != null && (
+          <span title="Spread mínimo para cubrir fees + slippage + umbral de ganancia mínima" style={{ color:'var(--text-dim)' }}>
+            Umbral viable: <span style={{ fontFamily:'var(--font-mono)', color:'rgba(245,158,11,0.8)' }}>{op.viabilityThresholdPct}%</span>
+          </span>
         )}
         {op.fillProbability != null && (
           <span title="Probabilidad de ejecución completa" style={{ color:'var(--text-dim)' }}>
@@ -252,6 +259,7 @@ export default function ArbitragePage() {
   const [resetting,    setResetting]= useState(false);
   const [confirmReset, setConfirm]  = useState(false);
   const [activeTab,    setActiveTab]= useState('bot');
+  const [selectedTrade, setSelectedTrade] = useState(null);
   const lastTradeIdRef  = useRef(null);
   const scoreTimeoutRef = useRef(null);
 
@@ -315,6 +323,7 @@ export default function ArbitragePage() {
   const orderBooks        = data?.orderBooks        || [];
   const opportunities     = data?.opportunities     || [];
   const triangularSignal  = data?.triangularSignal  || null;
+  const statArbSignals    = data?.statArbSignals    || [];
   const wallets           = data?.wallets           || {};
   const pnl               = data?.pnl              || {};
   const wsStatusMap       = data?.wsStatus          || {};
@@ -355,32 +364,90 @@ export default function ArbitragePage() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16, padding:'0 2px' }}>
+      {selectedTrade && <TradeAuditModal trade={selectedTrade} onClose={() => setSelectedTrade(null)} />}
 
-      {/* ── TAB BAR ──────────────────────────────────────────────────────── */}
-      <div style={{ display:'flex', gap:4, background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'6px 8px', flexWrap:'wrap' }}>
-        {TABS.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} title={tab.desc} style={{
-            padding:'7px 16px', borderRadius:8, border:'none', cursor:'pointer', fontWeight:700, fontSize:12,
-            background: activeTab===tab.id ? 'linear-gradient(135deg,rgba(255,45,120,0.15),rgba(88,65,217,0.15))' : 'transparent',
-            color: activeTab===tab.id ? 'var(--text)' : 'var(--text-dim)',
-            borderBottom: activeTab===tab.id ? '2px solid #FF2D78' : '2px solid transparent',
-            transition:'all 0.15s',
-          }}>{tab.label}</button>
-        ))}
+      {/* ── SYSTEM READY INDICATOR ───────────────────────────────────────── */}
+      {/* Shows a warm-up banner until all feeds are live. Green = demo-ready. */}
+      {(() => {
+        const wsValues = Object.values(wsStatusMap);
+        const totalExchanges = wsValues.length || 5;
+        const liveExchanges  = wsValues.filter(Boolean).length;
+        const staleFeeds     = Object.values(feedFreshness).filter(f => f?.stale).length;
+        const allReady       = liveExchanges >= 4 && staleFeeds === 0;
+        const partialReady   = liveExchanges >= 2;
+        if (allReady) return (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'rgba(0,184,122,0.08)', border:'1px solid rgba(0,184,122,0.25)', borderRadius:10, fontSize:11 }}>
+            <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--color-green)', animation:'pulseDot 1.5s infinite', flexShrink:0 }}/>
+            <span style={{ fontWeight:800, color:'var(--color-green)' }}>SISTEMA LISTO</span>
+            <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges vivos · Todos los feeds frescos · Motor activo</span>
+          </div>
+        );
+        if (partialReady) return (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:10, fontSize:11 }}>
+            <span style={{ width:8, height:8, borderRadius:'50%', background:'#F59E0B', animation:'pulseDot 1.5s infinite', flexShrink:0 }}/>
+            <span style={{ fontWeight:800, color:'#F59E0B' }}>CALENTANDO</span>
+            <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges conectados · Esperando feeds frescos…</span>
+          </div>
+        );
+        return (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'rgba(255,45,120,0.07)', border:'1px solid rgba(255,45,120,0.20)', borderRadius:10, fontSize:11 }}>
+            <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--color-red)', flexShrink:0 }}/>
+            <span style={{ fontWeight:800, color:'var(--color-red)' }}>CONECTANDO</span>
+            <span style={{ color:'var(--text-dim)' }}>Estableciendo WebSockets con los exchanges…</span>
+          </div>
+        );
+      })()}
 
-        {/* Live status pills — always visible */}
-        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
-          <div style={{ display:'flex', gap:5 }}>
+      {/* ── TAB BAR — altura fija, nunca hace wrap ───────────────────────── */}
+      <div style={{
+        display:'flex', alignItems:'center', gap:2,
+        background:'var(--bg-surface)', border:'1px solid var(--border)',
+        borderRadius:'var(--radius-lg)', padding:'5px 8px',
+        flexWrap:'nowrap', overflow:'hidden', minWidth:0,
+        height: 46, flexShrink: 0,
+      }}>
+        {/* Tabs — flex fijo, nunca encogen */}
+        <div style={{ display:'flex', gap:2, flexShrink:0 }}>
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} title={tab.desc} style={{
+              padding:'6px 14px', borderRadius:8, border:'none', cursor:'pointer',
+              fontWeight:700, fontSize:11.5, whiteSpace:'nowrap', flexShrink:0,
+              background: activeTab===tab.id ? 'linear-gradient(135deg,rgba(255,45,120,0.15),rgba(88,65,217,0.15))' : 'transparent',
+              color: activeTab===tab.id ? 'var(--text)' : 'var(--text-dim)',
+              boxShadow: activeTab===tab.id ? 'inset 0 -2px 0 #FF2D78' : 'inset 0 -2px 0 transparent',
+              transition:'all 0.15s',
+            }}>{tab.label}</button>
+          ))}
+        </div>
+
+        {/* Spacer */}
+        <div style={{ flex:1, minWidth:8 }} />
+
+        {/* WS status pills — ancho fijo total, nunca desborda */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
             {Object.entries(wsStatusMap).filter(([k])=>k!=='Coinbase').map(([ex,on])=>(
-              <span key={ex} style={{ display:'flex', alignItems:'center', gap:3, fontSize:10, fontWeight:700, color:on?'var(--color-green)':'var(--text-dim)' }}>
-                <span style={{ width:5, height:5, borderRadius:'50%', background:on?'var(--color-green)':'var(--text-dim)', animation:on?'pulseDot 1.5s infinite':'none' }}/>
+              <span key={ex} style={{
+                display:'flex', alignItems:'center', gap:3,
+                fontSize:10, fontWeight:700,
+                color:on?'var(--color-green)':'var(--text-dim)',
+                width:32, // ancho fijo — nunca cambia el layout
+              }}>
+                <span style={{ width:5, height:5, borderRadius:'50%', flexShrink:0,
+                  background:on?'var(--color-green)':'var(--border)',
+                  animation:on?'pulseDot 1.5s infinite':'none' }}/>
                 {ex.slice(0,3)}
               </span>
             ))}
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, fontWeight:700 }}>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:sseOk?'#0052FF':'var(--text-dim)', animation:sseOk?'pulseDot 1.5s infinite':'none' }}/>
-            <span style={{ color:sseOk?'#0052FF':'var(--text-dim)' }}>{sseOk?`SSE${sseLatency?` ${sseLatency}ms`:''}` : 'Conectando…'}</span>
+          <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:10, fontWeight:700,
+            borderLeft:'1px solid var(--border)', paddingLeft:8 }}>
+            <span style={{ width:5, height:5, borderRadius:'50%', flexShrink:0,
+              background:sseOk?'#0052FF':'var(--border)',
+              animation:sseOk?'pulseDot 1.5s infinite':'none' }}/>
+            <span style={{ color:sseOk?'#0052FF':'var(--text-dim)', whiteSpace:'nowrap' }}>
+              {sseOk?'SSE':'–'}
+            </span>
           </div>
         </div>
       </div>
@@ -505,13 +572,42 @@ export default function ArbitragePage() {
           {/* Triangular signal */}
           {triangularSignal && (
             <div style={{ margin:'0 12px 12px', background:'linear-gradient(135deg,rgba(88,65,217,0.08),rgba(88,65,217,0.04))', border:'1px solid rgba(88,65,217,0.25)', borderRadius:10, padding:'10px 16px', display:'flex', alignItems:'center', gap:12, fontSize:12 }}>
-              <span>🔗</span>
+              <span style={{ fontSize:16, animation:'pulseDot 2s infinite' }}>🔗</span>
               <div style={{ flex:1 }}>
-                <span style={{ fontWeight:800, color:'#5741D9' }}>Señal 3-Leg Cross-Exchange</span>
-                <span style={{ color:'var(--text-muted)', marginLeft:8 }}>{triangularSignal.path}</span>
+                <span style={{ fontWeight:800, color:'#5741D9', display:'flex', alignItems:'center', gap:6 }}>
+                  ESTRATEGIA TRIANGULAR AKTIVA
+                  <span style={{ background:'#FF2D78', color:'#fff', fontSize:8, padding:'1px 5px', borderRadius:4 }}>AUTO-EXEC</span>
+                </span>
+                <span style={{ color:'var(--text-muted)', marginLeft:0, display:'block', fontSize:10 }}>{triangularSignal.path}</span>
               </div>
-              <span style={{ fontFamily:'var(--font-mono)', fontWeight:800, color:'#5741D9' }}>+{triangularSignal.netPct.toFixed(4)}% net</span>
-              <span style={{ fontSize:9, color:'#5741D9', background:'rgba(88,65,217,0.12)', padding:'2px 7px', borderRadius:4, fontWeight:700 }}>ℹ INFO</span>
+              <div style={{ textAlign:'right' }}>
+                <span style={{ fontFamily:'var(--font-mono)', fontWeight:900, color:'#5741D9', fontSize:14 }}>+{triangularSignal.netPct.toFixed(4)}%</span>
+                <div style={{ fontSize:9, color:'var(--text-dim)' }}>Neto proyectado</div>
+              </div>
+            </div>
+          )}
+
+          {/* StatArb signals */}
+          {statArbSignals.length > 0 && (
+            <div style={{ margin:'0 12px 12px', padding:'10px', background:'var(--bg-surface-3)', borderRadius:10, border:'1px solid var(--border)' }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em' }}>Señales de Arbitraje Estadístico (Mean Reversion)</div>
+              <div style={{ display:'flex', gap:10, overflowX:'auto', paddingBottom:4 }}>
+                {statArbSignals.map((s, i) => (
+                  <div key={i} style={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, padding:'8px 12px', minWidth:180 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                      <span style={{ fontSize:10, fontWeight:800 }}>{s.buyExchange}→{s.sellExchange}</span>
+                      <span style={{ fontSize:10, fontWeight:900, color:s.zScore>0?'var(--color-green)':'var(--color-red)' }}>Z={s.zScore}</span>
+                    </div>
+                    <div style={{ height:4, background:'var(--bg-surface-3)', borderRadius:2, overflow:'hidden', marginBottom:6 }}>
+                      <div style={{ height:'100%', width:`${s.confidence}%`, background:s.zScore>2?'var(--color-green)':'var(--color-yellow)' }} />
+                    </div>
+                    <div style={{ fontSize:9, color:'var(--text-dim)', display:'flex', justifyContent:'space-between' }}>
+                      <span>Confianza {s.confidence.toFixed(0)}%</span>
+                      {s.viable && <span style={{ color:'var(--color-green)', fontWeight:800 }}>VIABLE</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </Card>
@@ -707,8 +803,8 @@ export default function ArbitragePage() {
                 )}
                 {history.map((t,i)=>(
                   <tr key={t.id||i} style={{ borderTop:'1px solid var(--border)', background: t.synthetic?'rgba(255,200,0,0.03)':'' }}
-                    onMouseEnter={e=>e.currentTarget.style.background='var(--bg-surface-2)'}
-                    onMouseLeave={e=>e.currentTarget.style.background=t.synthetic?'rgba(255,200,0,0.03)':''}>
+                    className="row-hover"
+                    onClick={() => setSelectedTrade(t)}>
                     <td style={{ padding:'7px 9px', color:'var(--text-dim)', fontWeight:600 }}>
                       {i+1}{t.synthetic&&<span style={{ marginLeft:3, fontSize:8, color:'#F59E0B', fontWeight:800 }}>DEMO</span>}
                     </td>

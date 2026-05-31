@@ -261,58 +261,64 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
         </Section>
       </div>
 
-      {/* Fill Probability for current top opportunity */}
-      {topViable && (
-        <Section title="🎯 Fill Probability Engine — Oportunidad Actual">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-            {/* Big score */}
-            <div style={{ textAlign: 'center', minWidth: 80 }}>
-              <div style={{ fontWeight: 900, fontSize: 40, fontFamily: 'var(--font-mono)', color: topViable.fillProbability >= 80 ? 'var(--color-green)' : topViable.fillProbability >= 50 ? 'var(--color-yellow)' : 'var(--color-red)' }}>
-                {topViable.fillProbability ?? '—'}%
+      {/* Fill Probability Section — Always rendered to prevent layout shifts */}
+      <Section title="🎯 Fill Probability Engine — Oportunidad Actual">
+        {!topViable ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13, minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            Buscando oportunidad viable para calcular probabilidad de ejecución...
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+              {/* Big score */}
+              <div style={{ textAlign: 'center', minWidth: 80 }}>
+                <div style={{ fontWeight: 900, fontSize: 40, fontFamily: 'var(--font-mono)', color: topViable.fillProbability >= 80 ? 'var(--color-green)' : topViable.fillProbability >= 50 ? 'var(--color-yellow)' : 'var(--color-red)' }}>
+                  {topViable.fillProbability ?? '—'}%
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Fill Probability</div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Fill Probability</div>
-            </div>
-            {/* Breakdown */}
-            {topViable.fillProbabilityBreakdown && (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {[
-                  { label: 'Depth Score (40%)',    val: topViable.fillProbabilityBreakdown.depthScore },
-                  { label: 'Spread Score (25%)',   val: topViable.fillProbabilityBreakdown.spreadScore },
-                  { label: 'Latency Score (20%)',  val: topViable.fillProbabilityBreakdown.latencyScore },
-                  { label: 'Liquidity Score (15%)',val: topViable.fillProbabilityBreakdown.liquidityScore },
-                ].map(({ label, val }) => (
-                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, width: 160, color: 'var(--text-dim)' }}>{label}</span>
-                    <div style={{ flex: 1, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ width: `${val}%`, height: '100%', background: scoreColor(val), borderRadius: 3 }} />
+              {/* Breakdown */}
+              {topViable.fillProbabilityBreakdown && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {[
+                    { label: 'Depth Score (40%)',    val: topViable.fillProbabilityBreakdown.depthScore },
+                    { label: 'Spread Score (25%)',   val: topViable.fillProbabilityBreakdown.spreadScore },
+                    { label: 'Latency Score (20%)',  val: topViable.fillProbabilityBreakdown.latencyScore },
+                    { label: 'Liquidity Score (15%)',val: topViable.fillProbabilityBreakdown.liquidityScore },
+                  ].map(({ label, val }) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, width: 160, color: 'var(--text-dim)' }}>{label}</span>
+                      <div style={{ flex: 1, height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${val}%`, height: '100%', background: scoreColor(val), borderRadius: 3 }} />
+                      </div>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, minWidth: 24, textAlign: 'right', color: scoreColor(val) }}>{val}</span>
                     </div>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, minWidth: 24, textAlign: 'right', color: scoreColor(val) }}>{val}</span>
+                  ))}
+                </div>
+              )}
+              {/* Context */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 150 }}>
+                {[
+                  { label: 'Par',           val: `${topViable.buyExchange} → ${topViable.sellExchange}` },
+                  { label: 'Spread',        val: `${topViable.spreadPct}%` },
+                  { label: 'Buy Fill',      val: `${topViable.buyFillPct ?? '—'}%` },
+                  { label: 'Sell Fill',     val: `${topViable.sellFillPct ?? '—'}%` },
+                  { label: 'Feed',          val: topViable.buySource === 'ws' && topViable.sellSource === 'ws' ? 'WS ×2' : 'Mixed' },
+                  ...(topViable.recommendedSize != null ? [{ label: 'Tamaño Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
+                ].map(({ label, val }) => (
+                  <div key={label} style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-dim)', width: 80 }}>{label}:</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{val}</span>
                   </div>
                 ))}
               </div>
-            )}
-            {/* Context */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 150 }}>
-              {[
-                { label: 'Par',           val: `${topViable.buyExchange} → ${topViable.sellExchange}` },
-                { label: 'Spread',        val: `${topViable.spreadPct}%` },
-                { label: 'Buy Fill',      val: `${topViable.buyFillPct ?? '—'}%` },
-                { label: 'Sell Fill',     val: `${topViable.sellFillPct ?? '—'}%` },
-                { label: 'Feed',          val: topViable.buySource === 'ws' && topViable.sellSource === 'ws' ? 'WS ×2' : 'Mixed' },
-                ...(topViable.recommendedSize != null ? [{ label: 'Tamaño Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
-              ].map(({ label, val }) => (
-                <div key={label} style={{ display: 'flex', gap: 8 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)', width: 80 }}>{label}:</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{val}</span>
-                </div>
-              ))}
             </div>
-          </div>
-          <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '8px 0 0' }}>
-            Fill Probability = Depth (40%) + Spread Edge vs Break-even (25%) + WS latency (20%) + Slippage method (15%). No usa valores aleatorios.
-          </p>
-        </Section>
-      )}
+            <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '8px 0 0' }}>
+              Fill Probability = Depth (40%) + Spread Edge vs Break-even (25%) + WS latency (20%) + Slippage method (15%). No usa valores aleatorios.
+            </p>
+          </>
+        )}
+      </Section>
     </div>
   );
 }

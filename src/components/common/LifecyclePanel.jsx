@@ -51,29 +51,29 @@ export default function LifecyclePanel({ data }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* Summary Row */}
-      {summary.count > 0 && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10,
-        }}>
-          {[
-            { label: 'Total Expiradas',     value: summary.count.toLocaleString(),         color: 'var(--text)' },
-            { label: 'Dur. Promedio',        value: fmtMs(summary.avgDurationMs),          color: 'var(--color-green)' },
-            { label: 'Apariciones Prom.',    value: summary.avgSeenCount?.toString(),      color: 'var(--color-green)' },
-            { label: 'Spread Prom.',         value: `${summary.avgMaxSpread}%`,            color: 'var(--color-yellow)' },
-            { label: 'Profit Prom.',         value: `$${fmt4(summary.avgMaxProfit)}`,      color: summary.avgMaxProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
-            { label: 'Más Larga',            value: fmtMs(summary.longestMs),              color: 'var(--color-green)' },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={{
-              background: 'var(--bg-surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)', padding: '10px 14px',
-            }}>
-              <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700, marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 14, fontWeight: 900, fontFamily: 'var(--font-mono)', color }}>{value || '—'}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Summary Row — Always rendered to prevent layout shifts */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10,
+        minHeight: 64, // Altura mínima fija para estabilizar el diseño
+      }}>
+        {[
+          { label: 'Total Expiradas',     value: summary.count?.toLocaleString() || '0', color: 'var(--text)' },
+          { label: 'Dur. Promedio',        value: summary.avgDurationMs ? fmtMs(summary.avgDurationMs) : '0ms', color: 'var(--color-green)' },
+          { label: 'Apariciones Prom.',    value: summary.avgSeenCount?.toString() || '0', color: 'var(--color-green)' },
+          { label: 'Spread Prom.',         value: summary.avgMaxSpread != null ? `${summary.avgMaxSpread}%` : '0%', color: 'var(--color-yellow)' },
+          { label: 'Profit Prom.',         value: summary.avgMaxProfit != null ? `$${fmt4(summary.avgMaxProfit)}` : '$0.0000', color: (summary.avgMaxProfit || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
+          { label: 'Más Larga',            value: summary.longestMs ? fmtMs(summary.longestMs) : '0ms', color: 'var(--color-green)' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', padding: '10px 14px',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center'
+          }}>
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700, marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 900, fontFamily: 'var(--font-mono)', color }}>{value}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Active Lifecycles */}
       <div style={{

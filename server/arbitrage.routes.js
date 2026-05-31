@@ -47,13 +47,19 @@ const {
 // ─── Bot state ────────────────────────────────────────────────────────────
 let botEnabled   = true;
 let botStarted   = Date.now();
-let lastExecTs   = 0;
 let minScore     = 10;
+
+// ─── Unified execution cooldown ───────────────────────────────────────────
+// SINGLE shared tracker for both event-driven and polling-loop execution.
+// Previously two separate variables (_lastEventExecTs / lastExecTs) allowed
+// both paths to fire on the same opportunity within the 300ms window.
+// Now any execution — regardless of source — updates this single timestamp.
+const EXEC_COOLDOWN = 300; // ms — minimum interval between any two executions
+let _lastAnyExecTs  = 0;
 
 const recentFingerprints = new Map();
 const FINGERPRINT_TTL    = 5000;
 const FINGERPRINT_MAX    = 500;
-const MIN_EXEC_INTERVAL  = 300;
 
 let _totalOpportunitiesScanned = 0;
 let _totalViableFound          = 0;
@@ -102,7 +108,7 @@ async function loadEquityCurve() {
   }
 }
 
-setTimeout(loadEquityCurve, 3000);
+setTimeout(loadEquityCurve, 500);
 
 function appendEquityPoint(trade) {
   const prev = _equityCurve[_equityCurve.length - 1]?.pnl || 0;
@@ -148,13 +154,14 @@ function checkFingerprint(op, now) {
 }
 
 // ─── Event-driven detection (< 30ms latencia) ─────────────────────────────
-let _lastEventExecTs = 0;
-const EVENT_EXEC_COOLDOWN = 300;
+// Uses the shared _lastAnyExecTs cooldown. The polling loop (150ms) uses the
+// same variable so neither path can fire within EXEC_COOLDOWN ms of the other.
+// Deduplication is also enforced by recentFingerprints (5s TTL per price level).
 
 priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
   try {
     const now = Date.now();
-    if (now - _lastEventExecTs < EVENT_EXEC_COOLDOWN) return;
+    if (now - _lastAnyExecTs < EXEC_COOLDOWN) return;
     if (!botEnabled || isDailyLossBreached()) return;
 
     const orderBooks = await getOrderBooks();
@@ -162,7 +169,7 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
 
     const bookRecvMs = Date.now() - now;
     const detStart   = Date.now();
-    const { opportunities: rawOpps, evalMs: detectEvalMs } = detectOpportunities(orderBooks);
+    const { opportunities: rawOpps, triangularSignal, statArbSignals, evalMs: detectEvalMs } = detectOpportunities(orderBooks);
     const detectMs = Date.now() - detStart;
 
     // ── Hackathon enhancements ──────────────────────────────────────
@@ -179,7 +186,8 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     // ────────────────────────────────────────────────────────────────
 
     _totalOpportunitiesScanned += opportunities.length;
-    _totalViableFound += opportunities.filter(o => o.viable).length;
+    // NOTE: viableFound is counted only in the polling loop to avoid double-counting
+    // when both event-driven and loop detect the same tick's opportunities.
 
     const best = opportunities.find(op => {
       if (!op.viable || op.circuitBreaker || !op.liquidityOk) return false;
@@ -190,7 +198,7 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     if (!best) return;
 
     const evalStart = Date.now();
-    _lastEventExecTs = now;
+    _lastAnyExecTs = now; // unified cooldown — blocks polling loop for EXEC_COOLDOWN ms
 
     const walletSnapshot = getBalances();
     const result = executeSimulated(best, walletSnapshot, best.tradeAmount || 0.05);
@@ -222,6 +230,7 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
       detectionSource: 'event_driven',
       detectionLatencyMs: totalLatencyMs,
       timing: { bookRecvMs, detectMs, decisionMs, totalLatencyMs },
+      statArbSignals,
     });
 
     pushToClients(alertsClients, {
@@ -231,6 +240,15 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     // ─── Triangular execution (auto) ──────────────────────────────────
     // After a successful bilateral trade, attempt to execute any active
     // triangular signal if it clears the minimum threshold.
+    //
+    // ARCHITECTURE NOTE — Why only leg2 is applied to wallets:
+    // executeTriangularSimulated() produces leg1 (descriptive: buy BTC on A) and
+    // leg2 (executable: full bilateral flow buy@A + sell@C). leg2 encodes both sides:
+    //   buyExchange=A  → USDT[A] decremented, BTC[A] incremented  (leg1 effect)
+    //   sellExchange=C → BTC[C] decremented, USDT[C] incremented  (leg2 effect)
+    // applyTrade(leg2) therefore correctly updates all four wallet balances.
+    // leg1 is not applied separately to avoid double-counting the USDT debit.
+    // leg2.netProfit = totalNetProfit (both fees, full gross) — reported to equity curve.
     try {
       const { triangularSignal } = detectOpportunities(orderBooks);
       if (triangularSignal && (triangularSignal.netPct || 0) >= 0.05) {
@@ -273,6 +291,35 @@ priceEmitter.on('priceUpdate', async ({ exchange, bid, ask, ts }) => {
     }
     // ──────────────────────────────────────────────────────────────────
 
+    // ─── StatArb execution (auto) ──────────────────────────────────
+    try {
+      const bestStat = (statArbSignals || []).find(s => s.viable && s.confidence >= 90);
+      if (bestStat) {
+        const walletNow = getBalances();
+        // StatArb trade is treated as a high-conviction bilateral trade
+        // We reuse executeSimulated but with a synthetic opportunity structure
+        const result = executeSimulated({
+          ...bestStat,
+          buyPrice: orderBooks.find(b => b.exchange === bestStat.buyExchange).ask,
+          sellPrice: orderBooks.find(b => b.exchange === bestStat.sellExchange).bid,
+          netProfit: bestStat.diff * 0.05, // Simplified
+        }, walletNow, 0.05);
+        
+        if (result.ok) {
+          const applyRes = await applyTrade(result.trade);
+          if (applyRes.ok) {
+             appendEquityPoint(applyRes.trade);
+             addDailyPnl(applyRes.trade.netProfit || 0);
+             console.log(`[stat-arb] EXECUTED ${bestStat.buyExchange}→${bestStat.sellExchange} Z=${bestStat.zScore}`);
+             pushToClients(sseClients, { type: 'stat_arb_executed', trade: applyRes.trade, zScore: bestStat.zScore });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[stat-arb execution]', e.message);
+    }
+    // ───────────────────────────────────────────────────────────────
+
   } catch (e) {
     console.warn('[event-driven]', e.message);
   }
@@ -290,12 +337,14 @@ async function arbitrageLoop() {
       let orderBooks = [];
       try { orderBooks = await getOrderBooks(); } catch (e) { console.warn('[arb loop] getOrderBooks:', e.message); return; }
 
-      let opportunities = [], triangularSignal = null, detectMs = 0;
+      let opportunities = [], triangularSignal = null, statArbSignals = [], detectMs = 0;
+      let det = { opportunities: [], triangularSignal: null, statArbSignals: [], evalMs: 0 };
       try {
         const detStart = Date.now();
-        const det = detectOpportunities(orderBooks);
+        det              = detectOpportunities(orderBooks);
         detectMs         = Date.now() - detStart;
         triangularSignal = det.triangularSignal;
+        statArbSignals   = det.statArbSignals || [];
 
         // ── Hackathon enhancements ──────────────────────────────────
         const btcPriceLoop = orderBooks.find(o => o.exchange === 'Binance')?.ask;
@@ -310,7 +359,7 @@ async function arbitrageLoop() {
         // ────────────────────────────────────────────────────────────
 
         _totalOpportunitiesScanned += opportunities.length;
-        _totalViableFound += opportunities.filter(o => o.viable).length;
+        _totalViableFound += opportunities.filter(o => o.viable && !o.synthetic).length; // synthetic excluded; counted here only (not in event-driven)
 
         if (_tickCount % LOG_EVERY === 0 && opportunities.length > 0) {
           const viableNow = opportunities.filter(o => o.viable).length;
@@ -327,7 +376,7 @@ async function arbitrageLoop() {
       let lastTrade = null;
       const now = Date.now();
 
-      if (botEnabled && now - lastExecTs >= MIN_EXEC_INTERVAL && !isDailyLossBreached()) {
+      if (botEnabled && now - _lastAnyExecTs >= EXEC_COOLDOWN && !isDailyLossBreached()) {
         const best = opportunities.find(op => {
           if (!op.viable || op.circuitBreaker || !op.liquidityOk) return false;
           if (op.score < minScore) return false;
@@ -342,8 +391,8 @@ async function arbitrageLoop() {
             if (!applyResult.ok) {
               console.warn('[arb loop] applyTrade rejected:', applyResult.reason);
             } else {
-              lastTrade  = applyResult.trade;
-              lastExecTs = now;
+              lastTrade       = applyResult.trade;
+              _lastAnyExecTs  = now; // unified cooldown
               appendEquityPoint(applyResult.trade);
               addDailyPnl(applyResult.trade.netProfit || 0);
               recordExecution(applyResult.trade); // ← intelligence tracking
@@ -392,6 +441,7 @@ async function arbitrageLoop() {
         orderBooks,
         opportunities:     oppsWithSize,
         triangularSignal,
+        statArbSignals:    statArbSignals,
         lastTrade,
         wallets,
         pnl:               getPnL(bestAskPrice),

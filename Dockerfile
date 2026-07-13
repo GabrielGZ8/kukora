@@ -21,7 +21,7 @@ WORKDIR /app
 # Only production dependencies — this stage never runs vite, so --omit=dev
 # is correct here (unlike the build stage above).
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy built assets and server
 COPY --from=builder /app/dist ./dist

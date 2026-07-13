@@ -1,4 +1,4 @@
-# Kukora<img width="26" height="26" alt="favicon" src="https://github.com/user-attachments/assets/efcf03f4-5175-4d4a-9295-7929268dfdb8" />
+# Kukora<img width="76" height="76" alt="favicon" src="https://github.com/user-attachments/assets/efcf03f4-5175-4d4a-9295-7929268dfdb8" />
 
 
 ### Quantitative Crypto Arbitrage Intelligence Platform
@@ -10,6 +10,8 @@
 ##  Live Demo
 
 **URL:** [[https://kukora-production.up.railway.app/arbitrage](https://kukora.up.railway.app/arbitrage)](https://kukora-production.up.railway.app/arbitrage)
+
+<img width="1888" height="1008" alt="image" src="https://github.com/user-attachments/assets/ceaeefc8-e1e7-4e51-991f-c38fd3d4869f" />
 
 ---
 
@@ -46,9 +48,12 @@
 
 ---
 
-## 1. Descripción del proyecto
+## 1. Descripción del proyectohttps://github.com/GabrielGZ8/kukora/blob/main/README.md
 
 **Kukora** es una plataforma de inteligencia de arbitraje cuantitativo para Bitcoin y otros pares, operando sobre **cinco exchanges reales en simultáneo** (Binance, Kraken, Bybit, OKX y Coinbase) vía WebSockets nativos.
+
+<img width="1873" height="1010" alt="image" src="https://github.com/user-attachments/assets/aa52ad11-44ad-44b3-8668-d40430c1a5ec" />
+
 
 ### Qué problema resuelve
 

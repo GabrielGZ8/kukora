@@ -312,11 +312,14 @@ const es = {
     statusBadge: 'MOTOR NO AFECTADO · DATOS SEGUROS',
     tryAgain: '↻ Intentar de nuevo',
   },
-  auth: {
+    auth: {
     validation: {
       emailRequired: 'El email es obligatorio',
       emailInvalid: 'Ingresá un email válido',
       passwordRequired: 'La contraseña es obligatoria',
+      passwordTooShort: 'La contraseña debe tener al menos 8 caracteres',
+      confirmRequired: 'Confirmá tu contraseña',
+      passwordsMismatch: 'Las contraseñas no coinciden',
     },
     googleErrors: {
       popupBlocked: 'Tu navegador bloqueó la ventana de inicio de sesión de Google. Permití ventanas emergentes para este sitio e intentá de nuevo.',
@@ -342,6 +345,22 @@ const es = {
       googleUnavailable: 'Google Sign-In no disponible',
       noAccount: '¿No tenés una cuenta?',
       createOne: 'Creá una',
+    },
+    register: {
+      eyebrow: 'Empecemos',
+      title: 'Creá tu cuenta',
+      subtitle: 'Configurá tu motor de arbitraje y empezá a monitorear oportunidades en tiempo real.',
+      fullNameLabel: 'Nombre completo',
+      namePlaceholder: 'Tu nombre',
+      passwordPlaceholder: 'Mínimo 8 caracteres',
+      confirmLabel: 'Confirmar contraseña',
+      confirmPlaceholder: 'Repetí tu contraseña',
+      creatingAccount: 'Creando cuenta…',
+      accountCreated: '¡Cuenta creada!',
+      successMessage: 'Cuenta creada con éxito. Redirigiendo…',
+      createAccount: 'Crear cuenta',
+      signUpWithGoogle: 'Registrarse con Google',
+      alreadyHaveAccount: '¿Ya tenés una cuenta?',
     },
   },
   triangular: {

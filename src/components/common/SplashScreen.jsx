@@ -1,7 +1,39 @@
 import { useEffect, useState } from "react";
 
+const MIN_DISPLAY_MS = 3200;
+const FADE_MS = 700;
+const HEALTH_TIMEOUT_MS = 2500;
+
 export default function SplashScreen({ onFinish }) {
   const [hide, setHide] = useState(false);
+  // Real system status, pulled from /health rather than a hardcoded label.
+  // Falls back to a neutral "connecting" message if the request is slow
+  // or fails — the splash should never look like it's lying about status.
+  const [status, setStatus] = useState({ label: 'Connecting to engine…', ok: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+
+    fetch('/health', { signal: controller.signal })
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        const engineUp = d?.engine?.running !== false;
+        const dbInfo = d?.db?.connected ? 'DB connected' : 'in-memory mode';
+        setStatus({
+          label: engineUp ? `Engine online · ${dbInfo}` : 'Engine starting…',
+          ok: !!d?.ok && engineUp,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setStatus({ label: 'Starting up…', ok: false });
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => { cancelled = true; clearTimeout(timer); controller.abort(); };
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -9,9 +41,9 @@ export default function SplashScreen({ onFinish }) {
 
       setTimeout(() => {
         onFinish?.();
-      }, 700);
-    }, 3200); 
- 
+      }, FADE_MS);
+    }, MIN_DISPLAY_MS);
+
     return () => clearTimeout(timer);
   }, [onFinish]);
 
@@ -227,6 +259,29 @@ export default function SplashScreen({ onFinish }) {
             transform: translateY(0);
           }
         }
+
+        .kukora-status {
+          margin-top: 14px;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          letter-spacing: 0.03em;
+          color: #94a3b8;
+          opacity: 0;
+          animation: textAppear 0.7s ease forwards;
+          animation-delay: 2.4s;
+          font-family: Inter, SF Pro Display, system-ui, sans-serif;
+        }
+
+        .status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          transition: background 0.3s ease;
+        }
       `}</style>
  
       <div className={`splash-screen ${hide ? "hide" : ""}`}>
@@ -248,7 +303,17 @@ export default function SplashScreen({ onFinish }) {
           </h1>
 
           <div className="kukora-subtitle">
-            Plataforma fintech
+            Bitcoin Arbitrage Platform
+          </div>
+
+          <div className="kukora-status">
+            <span
+              className="status-dot"
+              style={{
+                background: status.ok === null ? '#94a3b8' : status.ok ? '#22c55e' : '#f59e0b',
+              }}
+            />
+            {status.label}
           </div>
 
         </div>

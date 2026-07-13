@@ -1,0 +1,41 @@
+#!/bin/sh
+# C-1 fix: pre-commit hook — blocks commits that include .env or secrets.
+#
+# Two-layer defense:
+#  1. Explicitly block real .env files (but allow .env.example)
+#  2. Run detect-secrets if installed (catches hardcoded credentials)
+#
+# Install detect-secrets: pip install detect-secrets
+# Initialize baseline: detect-secrets scan > .secrets.baseline
+
+set -e
+
+# Layer 1: Block real .env files from being committed (but allow .env.example)
+STAGED=$(git diff --cached --name-only 2>/dev/null || true)
+BLOCKED=$(echo "$STAGED" | grep -E '(^|/)\.env$|(^|/)\.env\.local$|(^|/)\.env\.[^./]+\.local$' || true)
+if [ -n "$BLOCKED" ]; then
+  echo ""
+  echo "❌ BLOCKED: Attempted to commit a .env file."
+  echo "   Archivo(s) detectado(s):"
+  echo "$BLOCKED"
+  echo "   .env files must never be committed — they contain real credentials."
+  echo "   Use .env.example for the template. See docs/DeveloperGuide.md."
+  echo ""
+  exit 1
+fi
+
+# Layer 2: detect-secrets scan (if installed)
+if command -v detect-secrets >/dev/null 2>&1; then
+  if [ -f .secrets.baseline ]; then
+    detect-secrets-hook --baseline .secrets.baseline $STAGED 2>/dev/null || {
+      echo ""
+      echo "❌ BLOCKED: detect-secrets found potential secrets in staged files."
+      echo "   Run: detect-secrets scan > .secrets.baseline"
+      echo "   to update the baseline if these are false positives."
+      echo ""
+      exit 1
+    }
+  fi
+fi
+
+echo "✅ pre-commit: no secrets detected"

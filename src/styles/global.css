@@ -1,5 +1,5 @@
 /* ─── kukora Design Tokens — Light Fintech Theme ──────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
   /* Brand */
@@ -53,8 +53,12 @@
   --sidebar-width: 224px;
   --transition: 0.15s ease;
 
-  --font-ui:   'Inter', system-ui, sans-serif;
+  --font-ui:   -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+
+  /* Tooltip */
+  --tooltip-bg:   #1a1d27;
+  --tooltip-text: #e8eaf0;
 }
 
 .dark-theme {
@@ -78,6 +82,10 @@
   /* Sombras */
   --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.4);
   --shadow-lg:   0 8px 32px rgba(0,0,0,0.5);
+
+  /* Tooltip dark */
+  --tooltip-bg:   #252836;
+  --tooltip-text: #f0f2f7;
 }
 
 /* Transición suave para cambio de tema */
@@ -198,6 +206,12 @@ input, select { font: inherit; }
 .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
 @media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2,1fr); } }
+
+/* ─── pulseDot — used by inline `animation: 'pulseDot ...'` across components ─── */
+@keyframes pulseDot {
+  0%,100% { opacity: 1;   transform: scale(1);   }
+  50%      { opacity: 0.5; transform: scale(0.8); }
+}
 @media (max-width: 700px)  { .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; } }
 
 /* ─── Layout helpers ──────────────────────────────────────────────────── */
@@ -215,7 +229,7 @@ input, select { font: inherit; }
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.page-enter { animation: fadeSlideUp 0.25s ease forwards; }
+.page-enter { animation: fadeSlideUp 0.22s ease forwards; }
 
 /* ─── Table ───────────────────────────────────────────────────────────── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -286,12 +300,8 @@ a:focus:not(:focus-visible) { outline: none; }
 }
 .count-up { animation: countUp 0.4s ease forwards; }
 
-/* Smooth page transitions */
-@keyframes fadeSlideUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.page-enter { animation: fadeSlideUp 0.22s ease forwards; }
+/* Smooth page transitions — (M1 auditoría: esta definición estaba duplicada
+   con la de la línea ~214; se removió el duplicado y se dejó una sola) */
 
 /* Fade in */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -440,4 +450,35 @@ a:focus:not(:focus-visible) { outline: none; }
 }
 @media (min-width: 769px) {
   .show-mobile { display: none !important; }
+}
+
+/* Arbitrage page tab bar — horizontal scroll instead of silent clipping
+   when a tab group (e.g. OPERATIONAL, 7 tabs) doesn't fit the viewport. */
+.arb-tab-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.arb-tab-scroll::-webkit-scrollbar { height: 4px; }
+.arb-tab-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.arb-tab-scroll::-webkit-scrollbar-track { background: transparent; }
+
+@media (max-width: 640px) {
+  .arb-tab-scroll { -webkit-overflow-scrolling: touch; }
+}
+/* Live trade ticker — fixed to bottom of main content area */
+.live-ticker-fixed {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  flex-shrink: 0;
+  /* prevent scroll jitter on components during ticker appear/disappear */
+  will-change: auto;
+  transform: translateZ(0);
+}
+
+/* Prevent layout shift when arbitrage page panels resize near ticker */
+.arb-content-area {
+  contain: layout style;
 }

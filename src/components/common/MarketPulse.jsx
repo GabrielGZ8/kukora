@@ -1,5 +1,5 @@
 // ─── MarketPulse.jsx — live animated market summary widget ───────────────
-// Muestra 6 métricas clave con animación y tendencia en tiempo real
+// Displays 6 key metrics with animation and real-time trend indicators
 // Uso: <MarketPulse coins={coins} global={globalData} />
 
 import { useEffect, useRef, useState } from 'react';
@@ -55,7 +55,7 @@ export function MarketPulse({ coins = [], globalData }) {
 
   const metrics = [
     {
-      label: 'BTC Precio',
+      label: 'BTC Price',
       value: btc?.current_price,
       format: v => v ? `$${Math.round(v).toLocaleString('en')}` : '—',
       color: (btc?.price_change_percentage_24h || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)',
@@ -63,7 +63,7 @@ export function MarketPulse({ coins = [], globalData }) {
       subColor: (btc?.price_change_percentage_24h || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)',
     },
     {
-      label: 'ETH Precio',
+      label: 'ETH Price',
       value: eth?.current_price,
       format: v => v ? `$${Math.round(v).toLocaleString('en')}` : '—',
       color: (eth?.price_change_percentage_24h || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)',
@@ -95,11 +95,19 @@ export function MarketPulse({ coins = [], globalData }) {
       subColor: 'var(--text-dim)',
     },
     {
-      label: 'Δ Promedio 24h',
+      label: 'Vol. 24h',
+      value: totalVol,
+      format: fmtB,
+      color: 'var(--text)',
+      sub: 'Volume total Top 50',
+      subColor: 'var(--text-dim)',
+    },
+    {
+      label: 'Δ Average 24h',
       value: avgChange,
       format: v => fmtPct(v),
       color: avgChange >= 0 ? 'var(--color-green)' : 'var(--color-red)',
-      sub: avgChange >= 0 ? 'Momentum positivo' : 'Presión bajista',
+      sub: avgChange >= 0 ? 'Positive momentum' : 'Bearish pressure',
       subColor: 'var(--text-dim)',
     },
   ];

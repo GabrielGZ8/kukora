@@ -33,7 +33,7 @@ const fmtB = (n) => n >= 1e12 ? `${(n/1e12).toFixed(2)}T` : n >= 1e9 ? `${(n/1e9
 const fmt = (n) => n == null ? '—' : n >= 1 ? `$${n.toLocaleString('en', { maximumFractionDigits: 2 })}` : `$${n?.toFixed(5)}`;
 const fmtPct = (n) => n == null ? '—' : `${n >= 0 ? '+' : ''}${Number(n)?.toFixed(2)}%`;
 
-function CustomContent({ x, y, width, height, name, symbol, pct, price, image }) {
+function CustomContent({ x, y, width, height, name, symbol, pct, price, image: _image }) {
   if (width < 30 || height < 20) return null;
   const color = pctToColor(pct);
   const textColor = '#fff';
@@ -86,12 +86,12 @@ function HeatmapTooltip({ active, payload }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {[
-          { label: 'Precio', value: fmt(d.price) },
+          { label: 'Price', value: fmt(d.price) },
           { label: '24h', value: fmtPct(d.change24h), color: d.change24h >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
           { label: '1h', value: fmtPct(d.change1h), color: d.change1h >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
           { label: '7d', value: fmtPct(d.change7d), color: d.change7d >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
           { label: 'Market Cap', value: `$${fmtB(d.marketCap)}` },
-          { label: 'Volumen 24h', value: `$${fmtB(d.volume)}` },
+          { label: 'Volume 24h', value: `$${fmtB(d.volume)}` },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
@@ -125,8 +125,6 @@ export default function HeatmapPage() {
        : (c.price_change_percentage_24h || 0),
   }));
 
-  const treeData = [{ name: 'root', children: coins }];
-
   const gainersCount = coins.filter(c => c.change24h > 0).length;
   const breadth = coins.length ? +(gainersCount / coins.length * 100).toFixed(0) : 0;
 
@@ -137,7 +135,7 @@ export default function HeatmapPage() {
           <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: '-0.5px', marginBottom: 4 }}>
             <span style={{ background: 'var(--brand-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Market</span> Heatmap
           </h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Top 50 coins · Tamaño = Market Cap · Click para ir a Analytics</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Top 50 coins · Tamyear = Market Cap · Click para ir a Analytics</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Colorear por:</span>
@@ -206,7 +204,7 @@ export default function HeatmapPage() {
       </div>
 
       <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-dim)', textAlign: 'center' }}>
-        Haz click en cualquier bloque para ver el análisis técnico completo · Actualización cada 30s
+        Haz click en cualquier bloque para ver el analysis técnico completo · Update cada 30s
       </div>
     </div>
   );

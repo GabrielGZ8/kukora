@@ -1,6 +1,6 @@
 // ─── AnalyzePage.jsx — Dataset Analysis Engine ───────────────────────────
-// El as bajo la manga del hackathon: sube cualquier CSV y Kukora ejecuta
-// el stack cuantitativo completo automáticamente
+// Advanced dataset analysis pipeline: upload any price CSV and run the full quant stack
+// runs the full quantitative stack automatically
 import { useState, useRef, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine, Legend } from 'recharts';
 import { api } from '../api';
@@ -56,21 +56,10 @@ export default function AnalyzePage() {
   const analyze = useCallback(async (csvText) => {
     setLoading(true); setError(null); setResult(null);
     try {
-      const data = await api.get('/api/dataset/analyze').catch(() => null) ||
-        await fetch('/api/dataset/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ csv: csvText }),
-        }).then(r => r.json()).then(j => { if (!j.ok) throw new Error(j.error); return j.data; });
-      // Use fetch directly since api.get is GET only
-      const res = await fetch('/api/dataset/analyze', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv: csvText }),
-      });
-      const j = await res.json();
-      if (!j.ok) throw new Error(j.error || 'Error al analizar');
-      setResult(j.data);
-      toast.success(`Dataset analizado: ${j.data.stats.rows} filas`);
+      // api.post wraps fetch with timeout, retry-backoff, and normalized errors.
+      const result = await api.post('/api/dataset/analyze', { csv: csvText });
+      setResult(result);
+      toast.success(`Dataset analyzed: ${result.stats.rows} rows`);
     } catch (e) { setError(e.message); toast.error(e.message); }
     finally { setLoading(false); }
   }, []);
@@ -97,7 +86,10 @@ export default function AnalyzePage() {
   const loadExample = async () => {
     setLoading(true); setError(null);
     try {
+      // /api/dataset/example returns CSV text, not JSON — use raw fetch here.
+      // api.js is JSON-only; a dedicated non-JSON helper would be over-engineering.
       const r = await fetch('/api/dataset/example');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const csv = await r.text();
       setFilename('kukora_example.csv'); setRawText(csv);
       await analyze(csv);
@@ -105,12 +97,12 @@ export default function AnalyzePage() {
   };
 
   const TABS = [
-    { id:'overview',  label:'Resumen' },
-    { id:'chart',     label:'Gráfica' },
-    { id:'regime',    label:'Régimen + KCS' },
+    { id:'overview',  label:'Summary' },
+    { id:'chart',     label:'Chart' },
+    { id:'regime',    label:'Regime + KCS' },
     { id:'backtest',  label:'Backtest' },
     { id:'forecast',  label:'Forecast' },
-    { id:'export',    label:'Exportar' },
+    { id:'export',    label:'Export' },
   ];
 
   const regimeColor = result ? (REGIME_COLORS[result.regime?.id] || '#f59e0b') : '#f59e0b';
@@ -119,15 +111,15 @@ export default function AnalyzePage() {
     <div className="page-enter">
       <PageHeader
         title="Dataset Analyzer"
-        description="Sube cualquier CSV de precios y Kukora ejecuta el stack cuantitativo completo automáticamente"
-        badge="HACKATHON"
+        description="Upload any price CSV and Kukora runs the full quantitative analytics stack automatically"
+        badge="CSV"
         badgeColor="var(--color-primary)"
-        help="Acepta CSV con columnas: date/timestamp + price/close/value + volume (opcional). También acepta JSON. Ejecuta: Régimen, KCS, Anomalías, Monte Carlo, Backtest, Forecast."
+        help="Accepts CSV with columns: date/timestamp + price/close/value + volume (optional). Also accepts JSON. Runs: Regime, Anomalies, Monte Carlo, Backtest, Forecast."
         actions={
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn btn-ghost btn-sm" onClick={loadExample}>Cargar ejemplo</button>
+            <button className="btn btn-ghost btn-sm" onClick={loadExample}>Load ejemplo</button>
             <button className="btn btn-primary btn-sm" onClick={() => fileRef.current?.click()}>
-              ↑ Subir CSV
+              ↑ Upload CSV
             </button>
             <input ref={fileRef} type="file" accept=".csv,.txt,.json" style={{ display:'none' }} onChange={onFile} />
           </div>
@@ -148,12 +140,12 @@ export default function AnalyzePage() {
           onMouseLeave={e => { e.currentTarget.style.borderColor='var(--border-bright)'; e.currentTarget.style.background='var(--bg-surface-2)'; }}
         >
           <div style={{ fontSize:40, opacity:0.25, marginBottom:14 }}>↑</div>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:6 }}>Arrastra tu CSV aquí o haz clic para subir</div>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:6 }}>Drag your CSV here or click to upload</div>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>
-            Formato: <code style={{ background:'var(--bg-surface-3)', padding:'1px 6px', borderRadius:4, fontFamily:'var(--font-mono)' }}>date, price, volume</code> — columnas detectadas automáticamente
+            Format: <code style={{ background:'var(--bg-surface-3)', padding:'1px 6px', borderRadius:4, fontFamily:'var(--font-mono)' }}>date, price, volume</code> — columns detected automatically
           </div>
           <div style={{ display:'flex', gap:8, justifyContent:'center', flexWrap:'wrap' }}>
-            <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}>↑ Subir CSV</button>
+            <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); fileRef.current?.click(); }}>↑ Upload CSV</button>
             <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); loadExample(); }}>Ver ejemplo</button>
           </div>
         </div>
@@ -164,8 +156,8 @@ export default function AnalyzePage() {
       {loading && (
         <div style={{ textAlign:'center', padding:60 }}>
           <div className="spinner" style={{ margin:'0 auto 16px', width:28, height:28 }} />
-          <div style={{ fontSize:13, fontWeight:600 }}>Ejecutando análisis cuantitativo…</div>
-          <div style={{ fontSize:11, color:'var(--text-dim)', marginTop:6 }}>Régimen · KCS · Anomalías · Backtest · Forecast</div>
+          <div style={{ fontSize:13, fontWeight:600 }}>Ejecutando analysis cuantitativo…</div>
+          <div style={{ fontSize:11, color:'var(--text-dim)', marginTop:6 }}>Regime · KCS · Anomalies · Backtest · Forecast</div>
         </div>
       )}
 
@@ -174,24 +166,24 @@ export default function AnalyzePage() {
           {/* File info bar */}
           <div style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 16px', background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', marginBottom:20, flexWrap:'wrap' }}>
             <span style={{ fontSize:12, fontFamily:'var(--font-mono)', color:'var(--color-primary)', fontWeight:700 }}>{filename || 'dataset'}</span>
-            <span style={{ fontSize:11, color:'var(--text-dim)' }}>{result.stats.rows} filas · {result.stats.startDate} → {result.stats.endDate}</span>
+            <span style={{ fontSize:11, color:'var(--text-dim)' }}>{result.stats.rows} rows · {result.stats.startDate} → {result.stats.endDate}</span>
             {result.meta.hasVolume && <span style={{ fontSize:9, fontWeight:700, color:'var(--color-blue)', background:'var(--color-blue-dim)', padding:'2px 7px', borderRadius:99 }}>VOLUMEN ✓</span>}
             <button className="btn btn-ghost btn-sm" style={{ marginLeft:'auto', fontSize:11 }} onClick={() => { setResult(null); setFilename(''); setRawText(''); }}>
-              ✕ Limpiar
+              ✕ Clear
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} style={{ fontSize:11 }}>↑ Nuevo</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} style={{ fontSize:11 }}>↑ New</button>
           </div>
 
           {/* KPI row */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(120px, 1fr))', gap:10, marginBottom:20 }}>
-            <KpiCard label="Retorno Total" value={fmtPct(result.stats.totalReturn)} color={result.stats.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
-            <KpiCard label="Precio Inicio" value={fmt(result.stats.startPrice)} />
-            <KpiCard label="Precio Final"  value={fmt(result.stats.endPrice)} />
+            <KpiCard label="Return Total" value={fmtPct(result.stats.totalReturn)} color={result.stats.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
+            <KpiCard label="Price Home" value={fmt(result.stats.startPrice)} />
+            <KpiCard label="Price Final"  value={fmt(result.stats.endPrice)} />
             <KpiCard label="Max Drawdown"  value={`-${result.stats.maxDrawdown?.toFixed(2)}%`} color="var(--color-red)" />
             <KpiCard label="Sharpe Ratio"  value={result.stats.sharpeRatio?.toFixed(3)} color={result.stats.sharpeRatio>1?'var(--color-green)':result.stats.sharpeRatio>0?'var(--color-yellow)':'var(--color-red)'} />
-            <KpiCard label="Volatilidad σ" value={`${result.stats.dailyStdDev?.toFixed(2)}%/d`} color="var(--color-yellow)" />
+            <KpiCard label="Volatility σ" value={`${result.stats.dailyStdDev?.toFixed(2)}%/d`} color="var(--color-yellow)" />
             <KpiCard label="Días positivos" value={result.stats.positiveDays} sub={`de ${result.stats.rows} total`} />
-            <KpiCard label="Régimen" value={result.regime?.label?.split(' ')[0]} color={regimeColor} sub={`${result.regime?.confidence}% confianza`} />
+            <KpiCard label="Regime" value={result.regime?.label?.split(' ')[0]} color={regimeColor} sub={`${result.regime?.confidence}% confidence`} />
           </div>
 
           {/* Tabs */}
@@ -205,15 +197,15 @@ export default function AnalyzePage() {
           {activeTab==='overview' && (
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
               <div className="card">
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>📊 Estadísticas descriptivas</div>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>📊 Statistics descriptivas</div>
                 {[
-                  ['Retorno diario medio', fmtPct(result.stats.dailyMean)],
-                  ['Desv. estándar diaria', `${result.stats.dailyStdDev?.toFixed(4)}%`],
-                  ['Mejor día', fmtPct(result.stats.bestDay), 'var(--color-green)'],
-                  ['Peor día',  fmtPct(result.stats.worstDay), 'var(--color-red)'],
+                  ['Return diario medio', fmtPct(result.stats.dailyMean)],
+                  ['Daily std. deviation', `${result.stats.dailyStdDev?.toFixed(4)}%`],
+                  ['Mejor day', fmtPct(result.stats.bestDay), 'var(--color-green)'],
+                  ['Peor day',  fmtPct(result.stats.worstDay), 'var(--color-red)'],
                   ['Max Drawdown', `-${result.stats.maxDrawdown?.toFixed(3)}%`, 'var(--color-red)'],
                   ['Sharpe Ratio (anual)', result.stats.sharpeRatio?.toFixed(3), result.stats.sharpeRatio>1?'var(--color-green)':result.stats.sharpeRatio>0?'var(--color-yellow)':'var(--color-red)'],
-                  ['Días positivos', `${result.stats.positiveDays}/${result.stats.rows}`, 'var(--color-green)'],
+                  ['Positive days', `${result.stats.positiveDays}/${result.stats.rows}`, 'var(--color-green)'],
                 ].map(([label, value, color]) => (
                   <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid var(--border)' }}>
                     <span style={{ fontSize:12, color:'var(--text-muted)' }}>{label}</span>
@@ -222,13 +214,13 @@ export default function AnalyzePage() {
                 ))}
               </div>
               <div className="card">
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>📈 Distribución de retornos diarios</div>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>📈 Distribution de returns diarios</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={result.chart.returnsDist} margin={{ top:4, right:8, left:0, bottom:0 }}>
                     <CartesianGrid stroke="rgba(0,0,0,0.05)" strokeDasharray="3 3" />
                     <XAxis dataKey="lo" tickFormatter={v=>v?.toFixed(1)+'%'} tick={{ fontSize:9, fill:'var(--text-dim)' }} interval="preserveStartEnd" />
                     <YAxis tick={{ fontSize:9, fill:'var(--text-dim)' }} />
-                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={v=>[`${v} días`,'Frecuencia']} />
+                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={v=>[`${v} days`,'Frequency']} />
                     <Bar dataKey="count" radius={[2,2,0,0]}>
                       {result.chart.returnsDist.map((e,i) => <Cell key={i} fill={(e.lo+e.hi)/2>=0?'rgba(0,184,122,0.65)':'rgba(240,62,62,0.65)'} />)}
                     </Bar>
@@ -241,15 +233,15 @@ export default function AnalyzePage() {
           {/* Chart tab */}
           {activeTab==='chart' && (
             <div className="card">
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Precio histórico · {result.chart.prices.length} puntos</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:16 }}>Precio original + SMA20</div>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Price histórico · {result.chart.prices.length} puntos</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:16 }}>Price original + SMA20</div>
               <ResponsiveContainer width="100%" height={340}>
                 <LineChart data={result.chart.prices} margin={{ top:4, right:16, left:0, bottom:0 }}>
                   <CartesianGrid stroke="rgba(0,0,0,0.05)" strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fontSize:9, fill:'var(--text-dim)' }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize:9, fill:'var(--text-dim)', fontFamily:'var(--font-mono)' }} domain={['auto','auto']} tickFormatter={v=>fmt(v)} />
-                  <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[fmt(v), n==='price'?'Precio':'SMA20']} />
-                  <Legend formatter={n=>n==='price'?'Precio':'SMA 20'} />
+                  <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[fmt(v), n==='price'?'Price':'SMA20']} />
+                  <Legend formatter={n=>n==='price'?'Price':'SMA 20'} />
                   <Line type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={1.5} dot={false} />
                   <Line type="monotone" dataKey="sma20" stroke="#f59e0b" strokeWidth={1} dot={false} strokeDasharray="4 4" />
                 </LineChart>
@@ -268,7 +260,7 @@ export default function AnalyzePage() {
                   </div>
                   <div>
                     <div style={{ fontSize:18, fontWeight:900, color:regimeColor }}>{result.regime?.label}</div>
-                    <div style={{ fontSize:11, color:'var(--text-dim)' }}>Confianza: {result.regime?.confidence}%</div>
+                    <div style={{ fontSize:11, color:'var(--text-dim)' }}>Confidence: {result.regime?.confidence}%</div>
                   </div>
                 </div>
                 <div style={{ height:5, background:'var(--bg-surface-3)', borderRadius:99, overflow:'hidden', marginBottom:12 }}>
@@ -310,22 +302,22 @@ export default function AnalyzePage() {
           {activeTab==='backtest' && (
             <div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:10, marginBottom:20 }}>
-                <KpiCard label="Retorno Estrategia" value={fmtPct(result.backtest.strategy.totalReturn)} color={result.backtest.strategy.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
-                <KpiCard label="Retorno B&H"        value={fmtPct(result.backtest.buyHold.totalReturn)} color={result.backtest.buyHold.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
+                <KpiCard label="Return Strategy" value={fmtPct(result.backtest.strategy.totalReturn)} color={result.backtest.strategy.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
+                <KpiCard label="Return B&H"        value={fmtPct(result.backtest.buyHold.totalReturn)} color={result.backtest.buyHold.totalReturn>=0?'var(--color-green)':'var(--color-red)'} />
                 <KpiCard label="Win Rate"           value={result.backtest.strategy.winRate!=null?`${result.backtest.strategy.winRate}%`:'—'} />
                 <KpiCard label="Total Trades"       value={result.backtest.strategy.totalTrades??'—'} />
                 <KpiCard label="Max Drawdown"       value={`-${result.backtest.strategy.maxDrawdown?.toFixed(2)}%`} color="var(--color-red)" />
                 <KpiCard label="Sharpe Ratio"       value={result.backtest.strategy.sharpeRatio?.toFixed(3)} color={result.backtest.strategy.sharpeRatio>1?'var(--color-green)':'var(--color-yellow)'} />
               </div>
               <div className="card">
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Equity Curve — Estrategia vs Buy & Hold</div>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Equity Curve — Strategy vs Buy & Hold</div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:16 }}>Capital inicial $10,000 · SMA Crossover</div>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={result.backtest.equityCurve} margin={{ top:4, right:16, left:0, bottom:0 }}>
                     <CartesianGrid stroke="rgba(0,0,0,0.05)" strokeDasharray="3 3" />
                     <XAxis dataKey="i" tick={{ fontSize:9, fill:'var(--text-dim)' }} />
                     <YAxis tick={{ fontSize:9, fill:'var(--text-dim)', fontFamily:'var(--font-mono)' }} tickFormatter={v=>`$${v?.toFixed(0)}`} domain={['auto','auto']} />
-                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[`$${v?.toFixed(2)}`,n==='strategy'?'Estrategia':'Buy & Hold']} />
+                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[`$${v?.toFixed(2)}`,n==='strategy'?'Strategy':'Buy & Hold']} />
                     <ReferenceLine y={10000} stroke="rgba(0,0,0,0.15)" strokeDasharray="4 4" label={{ value:'Capital inicial', position:'right', fontSize:9, fill:'var(--text-dim)' }} />
                     <Legend />
                     <Line type="monotone" dataKey="strategy" stroke="var(--color-primary)" strokeWidth={2} dot={false} name="strategy" />
@@ -339,15 +331,15 @@ export default function AnalyzePage() {
           {/* Forecast tab */}
           {activeTab==='forecast' && (
             <div className="card">
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Forecast — 14 días</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:16 }}>Modelo ensemble: SMA drift + Holt-Winters EWM · Intervalo de confianza 90%</div>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Forecast — 14 days</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:16 }}>Model ensemble: SMA drift + Holt-Winters EWM · Interval de confidence 90%</div>
               {result.forecast ? (
                 <ResponsiveContainer width="100%" height={320}>
                   <LineChart data={result.forecast} margin={{ top:4, right:16, left:0, bottom:0 }}>
                     <CartesianGrid stroke="rgba(0,0,0,0.05)" strokeDasharray="3 3" />
                     <XAxis dataKey="h" tickFormatter={v=>`d+${v}`} tick={{ fontSize:10, fill:'var(--text-dim)' }} />
                     <YAxis tick={{ fontSize:9, fill:'var(--text-dim)', fontFamily:'var(--font-mono)' }} tickFormatter={v=>fmt(v)} domain={['auto','auto']} />
-                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[fmt(v),n==='point'?'Proyección':n==='upper'?'Máximo 90%':'Mínimo 90%']} />
+                    <Tooltip contentStyle={{ background:'#fff', border:'1px solid var(--border)', borderRadius:8, fontSize:11 }} formatter={(v,n)=>[fmt(v),n==='point'?'Projection':n==='upper'?'Maximum 90%':'Minimum 90%']} />
                     <Legend />
                     <Line type="monotone" dataKey="upper" stroke="rgba(0,184,122,0.35)" strokeWidth={1} dot={false} strokeDasharray="3 3" name="upper" />
                     <Line type="monotone" dataKey="point" stroke="var(--color-primary)" strokeWidth={2.5} dot={{ r:3 }} name="point" />
@@ -355,7 +347,7 @@ export default function AnalyzePage() {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState icon="◌" title="Sin proyecciones" description="El dataset no tiene suficientes datos para el modelo de forecast" />
+                <EmptyState icon="◌" title="Sin proyecciones" description="El dataset no tiene suficientes datos para el model de forecast" />
               )}
             </div>
           )}
@@ -363,16 +355,16 @@ export default function AnalyzePage() {
           {/* Export tab */}
           {activeTab==='export' && (
             <div className="card">
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Exportar resultados</div>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Export results</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px,1fr))', gap:10 }}>
                 {[
-                  { label:'Estadísticas completas', desc:'Todas las métricas cuantitativas', icon:'📊', onClick:()=>exportJSON(result.stats,'kukora_stats.json') },
-                  { label:'Régimen + KCS',           desc:'Régimen de mercado y señal KCS',  icon:'◈', onClick:()=>exportJSON({regime:result.regime,kcs:result.kcs},'kukora_regime_kcs.json') },
-                  { label:'Datos de precio',         desc:'Serie temporal procesada',        icon:'📈', onClick:()=>exportCSV(result.chart.prices,'kukora_prices.csv') },
-                  { label:'Distribución retornos',   desc:'Histograma de retornos diarios',  icon:'📉', onClick:()=>exportCSV(result.chart.returnsDist,'kukora_returns_dist.csv') },
-                  { label:'Equity Curve',            desc:'Estrategia vs Buy & Hold',        icon:'⟳', onClick:()=>exportCSV(result.backtest.equityCurve,'kukora_equity.csv') },
+                  { label:'Statistics completas', desc:'Todas las metrics cuantitativas', icon:'📊', onClick:()=>exportJSON(result.stats,'kukora_stats.json') },
+                  { label:'Regime + KCS',           desc:'Regime de market y signal KCS',  icon:'◈', onClick:()=>exportJSON({regime:result.regime,kcs:result.kcs},'kukora_regime_kcs.json') },
+                  { label:'Datos de price',         desc:'Serie temporal procesada',        icon:'📈', onClick:()=>exportCSV(result.chart.prices,'kukora_prices.csv') },
+                  { label:'Distribution returns',   desc:'Histograma de returns diarios',  icon:'📉', onClick:()=>exportCSV(result.chart.returnsDist,'kukora_returns_dist.csv') },
+                  { label:'Equity Curve',            desc:'Strategy vs Buy & Hold',        icon:'⟳', onClick:()=>exportCSV(result.backtest.equityCurve,'kukora_equity.csv') },
                   { label:'Forecast 14d',            desc:'Proyecciones con CI 90%',         icon:'◌', onClick:()=>result.forecast&&exportCSV(result.forecast,'kukora_forecast.csv') },
-                  { label:'Análisis completo (JSON)',desc:'Todo el resultado del análisis',   icon:'💾', onClick:()=>exportJSON(result,'kukora_full_analysis.json') },
+                  { label:'Analysis completo (JSON)',desc:'Todo el result del analysis',   icon:'💾', onClick:()=>exportJSON(result,'kukora_full_analysis.json') },
                 ].map(item => (
                   <button key={item.label} onClick={item.onClick}
                     style={{ display:'flex', alignItems:'flex-start', gap:12, padding:'14px 16px', background:'var(--bg-surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', textAlign:'left', transition:'all 0.13s' }}

@@ -12,7 +12,6 @@ const COINS = [
 ];
 const PERIODS = [{ label: '7d', days: 7 }, { label: '30d', days: 30 }, { label: '90d', days: 90 }];
 
-const fmt = v => v == null ? '—' : v >= 1 ? `$${v.toLocaleString('en', { maximumFractionDigits: 2 })}` : `$${v.toFixed(6)}`;
 const fmtN = (v, dec = 2) => v == null ? '—' : Number(v).toFixed(dec);
 
 function RSIBar({ value }) {
@@ -36,8 +35,8 @@ function RSIBar({ value }) {
 
 function SignalBadge({ signal }) {
   const colors = {
-    alcista: { bg: 'var(--color-green-dim)', color: 'var(--color-green)', border: 'rgba(0,184,122,0.25)' },
-    bajista: { bg: 'var(--color-red-dim)',   color: 'var(--color-red)',   border: 'rgba(240,62,62,0.25)' },
+    bullish: { bg: 'var(--color-green-dim)', color: 'var(--color-green)', border: 'rgba(0,184,122,0.25)' },
+    bearish: { bg: 'var(--color-red-dim)',   color: 'var(--color-red)',   border: 'rgba(240,62,62,0.25)' },
     neutral: { bg: 'var(--color-yellow-dim)',color: 'var(--color-yellow)',border: 'rgba(245,158,11,0.25)' },
   };
   const c = colors[signal.type] || colors.neutral;
@@ -127,7 +126,7 @@ export default function TechnicalAnalysisPage() {
 
   useEffect(() => {
     if (!technical || !sma20Ref.current) return;
-    const { prices, timestamps, indicators } = technical;
+    const { prices: _prices, timestamps, indicators } = technical;
 
     const toPoints = (arr) => arr
       .map((v, i) => v !== null ? { time: Math.floor(timestamps[i] / 1000), value: v } : null)
@@ -160,8 +159,8 @@ export default function TechnicalAnalysisPage() {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>◈ Análisis Técnico</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Indicadores cuantitativos en tiempo real · lightweight-charts</p>
+        <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>◈ Analysis Técnico</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Indicatores cuantitativos in real time · lightweight-charts</p>
       </div>
 
       {/* Selectors */}
@@ -208,22 +207,22 @@ export default function TechnicalAnalysisPage() {
           </div>
         </div>
 
-        {/* COLUMNA DERECHA — indicadores */}
+        {/* COLUMNA DERECHA — indicatores */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Indicadores */}
+          {/* Indicatores */}
           <div className="card">
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 14, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Indicadores</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 14, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Indicatores</div>
 
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>RSI 14</div>
-              {lastRSI != null ? <RSIBar value={lastRSI} /> : <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>Cargando…</span>}
+              {lastRSI != null ? <RSIBar value={lastRSI} /> : <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>Loading…</span>}
             </div>
 
             {[
               { label: 'MACD', value: lastMACD != null ? `${lastMACD >= 0 ? '+' : ''}${lastMACD.toFixed(4)}` : '—', color: lastMACD > 0 ? 'var(--color-green)' : 'var(--color-red)', sub: `Signal: ${lastSignal != null ? lastSignal.toFixed(4) : '—'}` },
-              { label: 'BB Width', value: bbW ? `${bbW}%` : '—', color: 'var(--color-purple)', sub: 'volatilidad implícita' },
-              { label: 'SMA20 vs Precio', value: smaVsPrice != null ? `${smaVsPrice >= 0 ? '+' : ''}${smaVsPrice}%` : '—', color: smaVsPrice > 0 ? 'var(--color-green)' : 'var(--color-red)', sub: 'precio relativo a media' },
+              { label: 'BB Width', value: bbW ? `${bbW}%` : '—', color: 'var(--color-purple)', sub: 'volatility implícita' },
+              { label: 'SMA20 vs Price', value: smaVsPrice != null ? `${smaVsPrice >= 0 ? '+' : ''}${smaVsPrice}%` : '—', color: smaVsPrice > 0 ? 'var(--color-green)' : 'var(--color-red)', sub: 'price relativo a media' },
             ].map(r => (
               <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--border)' }}>
                 <div>
@@ -235,21 +234,21 @@ export default function TechnicalAnalysisPage() {
             ))}
           </div>
 
-          {/* Señales */}
+          {/* Signales */}
           <div className="card">
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Señales Detectadas</div>
             {signals.length === 0
-              ? <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '12px 0' }}>Sin señales activas en este período</div>
+              ? <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '12px 0' }}>Sin signales activas en este period</div>
               : signals.map((s, i) => <SignalBadge key={i} signal={s} />)
             }
           </div>
 
-          {/* Stats del período */}
+          {/* Stats del period */}
           <div className="card">
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Estadísticas del Período</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Statistics del Period</div>
             {[
-              { label: 'Retorno', value: stats?.ret != null ? `${stats.ret >= 0 ? '+' : ''}${stats.ret}%` : '—', color: stats?.ret >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
-              { label: 'Volatilidad', value: stats?.vol != null ? `${stats.vol}%` : '—', color: 'var(--color-yellow)' },
+              { label: 'Return', value: stats?.ret != null ? `${stats.ret >= 0 ? '+' : ''}${stats.ret}%` : '—', color: stats?.ret >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
+              { label: 'Volatility', value: stats?.vol != null ? `${stats.vol}%` : '—', color: 'var(--color-yellow)' },
               { label: 'Max Drawdown', value: stats?.drawdown != null ? `${stats.drawdown}%` : '—', color: 'var(--color-red)' },
               { label: 'Sharpe Ratio', value: stats?.sharpe ?? '—', color: stats?.sharpe > 1 ? 'var(--color-green)' : 'var(--color-yellow)' },
             ].map(r => (

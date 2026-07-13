@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
 import { CoinTable } from '../components/common/CoinTable';
 import { PageHeader } from '../components/common/PageHeader';
+import { useTranslation } from '../i18n/I18nContext';
 
 const exportCSV = (coins) => {
   const headers = ['rank','id','name','symbol','price','change_1h','change_24h','change_7d','market_cap','volume_24h'];
@@ -31,6 +32,7 @@ const exportCSV = (coins) => {
 export default function MarketsPage() {
   const [search, setSearch] = useState('');
   const { data: mkt, loading, ts } = usePolling(() => api.markets(100), 30000);
+  const { t } = useTranslation();
 
   const coins = (mkt?.coins || []).filter(c => {
     if (!search) return true;
@@ -41,14 +43,14 @@ export default function MarketsPage() {
   return (
     <div>
       <PageHeader
-        title="Mercados Crypto"
-        description={ts ? `Top 100 · Actualizado ${ts.toLocaleTimeString('es-MX')}` : 'Top 100 · Cargando...'}
+        title={t('markets.title')}
+        description={ts ? `${t('markets.top100')} · ${t('markets.updatedAt')} ${ts.toLocaleTimeString('es-MX')}` : `${t('markets.top100')} · ${t('common.loading')}`}
         live
         actions={
           <div style={{ display:'flex', gap:10, alignItems:'center' }}>
           <input
             className="input"
-            placeholder="Buscar moneda..."
+            placeholder={t('markets.searchPlaceholder')}
             style={{ width:200 }}
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -57,8 +59,8 @@ export default function MarketsPage() {
             className="btn btn-secondary btn-sm"
             onClick={() => exportCSV(mkt?.coins || [])}
             disabled={!mkt?.coins?.length}
-            title="Exportar tabla completa como CSV">
-            ⬇ Exportar CSV
+            title={t('markets.exportTitle')}>
+            ⬇ {t('markets.exportCsv')}
           </button>
           </div>
         }

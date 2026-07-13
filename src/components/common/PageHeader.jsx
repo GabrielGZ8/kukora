@@ -1,5 +1,5 @@
 // ─── PageHeader.jsx ───────────────────────────────────────────────────────
-// Header reutilizable para todas las páginas
+// Reusable page header for all routes
 // Props: title, description, badge, badgeColor, actions, backPath, backLabel
 
 import { useNavigate } from 'react-router-dom';
@@ -34,7 +34,7 @@ export function PageHeader({
           onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; }}
           onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-dim)'; }}
         >
-          ← {backLabel || 'Volver'}
+          ← {backLabel || 'Back'}
         </button>
       )}
 

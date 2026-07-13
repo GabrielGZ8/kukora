@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
 import { PriceChart } from '../components/common/PriceChart';
+import { useTranslation } from '../i18n/I18nContext';
 
 const COINS = [
   { id:'bitcoin',      label:'BTC' },
@@ -13,9 +14,9 @@ const COINS = [
 const PERIODS = [{ label:'7d', days:7 },{ label:'30d', days:30 },{ label:'90d', days:90 }];
 
 const fmtP = v => v >= 1 ? `$${v.toLocaleString('en',{maximumFractionDigits:2})}` : `$${v?.toFixed(5)}`;
-const stat = (prices, fn) => prices.length ? fmtP(fn(prices)) : '—';
 
 export default function AnalyticsPage() {
+  const { t } = useTranslation();
   const [coin, setCoin]     = useState(COINS[0]);
   const [period, setPeriod] = useState(PERIODS[1]);
 
@@ -35,7 +36,7 @@ export default function AnalyticsPage() {
   const currentCoin = (mkt?.coins || []).find(c => c.id === coin.id);
   const currentPrice = currentCoin?.current_price;
 
-  // Métricas cuantitativas
+  // Metrics cuantitativas
   const max  = prices.length ? Math.max(...prices) : null;
   const min  = prices.length ? Math.min(...prices) : null;
   const mean = prices.length ? prices.reduce((a,b)=>a+b,0)/prices.length : null;
@@ -58,8 +59,8 @@ export default function AnalyticsPage() {
   return (
     <div>
       <div style={{ marginBottom:20 }}>
-        <h2 style={{ fontSize:20, fontWeight:800, marginBottom:4 }}>⬡ Analytics</h2>
-        <p style={{ fontSize:13, color:'var(--text-muted)' }}>Métricas cuantitativas y análisis histórico</p>
+        <h2 style={{ fontSize:20, fontWeight:800, marginBottom:4 }}>⬡ {t('analyticsPage.title')}</h2>
+        <p style={{ fontSize:13, color:'var(--text-muted)' }}>{t('analyticsPage.subtitle')}</p>
       </div>
 
       {/* Selectors */}
@@ -88,7 +89,7 @@ export default function AnalyticsPage() {
               {currentPrice ? fmtP(currentPrice) : '—'}
             </div>
             <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>
-              {coin.label} / USD · {period.label} histórico
+              {coin.label} / USD · {period.label} {t('analyticsPage.historicalSuffix')}
             </div>
           </div>
           {ret != null && (
@@ -96,7 +97,7 @@ export default function AnalyticsPage() {
               <div style={{ fontSize:20, fontWeight:800, color: ret>=0?'var(--color-green)':'var(--color-red)', textAlign:'right' }}>
                 {ret>=0?'+':''}{ret.toFixed(2)}%
               </div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>retorno {period.label}</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'right' }}>{t('analyticsPage.returnLabel')} {period.label}</div>
             </div>
           )}
         </div>
@@ -108,20 +109,20 @@ export default function AnalyticsPage() {
 
       {/* Stats */}
       <div className="grid-4" style={{ marginBottom:20 }}>
-        <StatCard label={`Máximo ${period.label}`}  value={max  ? fmtP(max)  : '—'} color="var(--color-green)"  sub="precio más alto" />
-        <StatCard label={`Mínimo ${period.label}`}   value={min  ? fmtP(min)  : '—'} color="var(--color-red)"    sub="precio más bajo" />
-        <StatCard label="Precio Promedio"             value={mean ? fmtP(mean) : '—'} color="var(--color-blue)"   sub={`media ${period.label}`} />
-        <StatCard label="Volatilidad %"               value={vol  ? `${vol.toFixed(2)}%` : '—'} color="var(--color-yellow)" sub="desv. estándar / media" />
+        <StatCard label={`${t('analyticsPage.statMaxLabel')} ${period.label}`}  value={max  ? fmtP(max)  : '—'} color="var(--color-green)"  sub={t('analyticsPage.subHighPrice')} />
+        <StatCard label={`${t('analyticsPage.statMinLabel')} ${period.label}`}   value={min  ? fmtP(min)  : '—'} color="var(--color-red)"    sub={t('analyticsPage.subLowPrice')} />
+        <StatCard label={t('analyticsPage.statAvgLabel')}             value={mean ? fmtP(mean) : '—'} color="var(--color-blue)"   sub={`${t('analyticsPage.subAvgPrefix')} ${period.label}`} />
+        <StatCard label={t('analyticsPage.statVolLabel')}               value={vol  ? `${vol.toFixed(2)}%` : '—'} color="var(--color-yellow)" sub={t('analyticsPage.subStdDev')} />
       </div>
 
       {/* Extra metrics */}
       <div className="grid-2">
         <div className="card">
-          <div style={{ fontSize:13, color:'var(--text-muted)', fontWeight:600, marginBottom:16 }}>MÉTRICAS AVANZADAS</div>
+          <div style={{ fontSize:13, color:'var(--text-muted)', fontWeight:600, marginBottom:16 }}>{t('analyticsPage.advancedMetricsTitle')}</div>
           {[
-            { label:'Sharpe Ratio (aprox.)', value: sharpe ?? '—', sub:'retorno / volatilidad' },
-            { label:'Rango precio', value: (max&&min) ? `${fmtP(min)} – ${fmtP(max)}` : '—', sub:`spread ${period.label}` },
-            { label:'Retorno vs BTC dom.', value: currentCoin ? `${currentCoin.price_change_percentage_7d_in_currency?.toFixed(2)}%` : '—', sub:'cambio 7d' },
+            { label: t('analyticsPage.sharpeLabel'), value: sharpe ?? '—', sub: t('analyticsPage.sharpeSub') },
+            { label: t('analyticsPage.priceRangeLabel'), value: (max&&min) ? `${fmtP(min)} – ${fmtP(max)}` : '—', sub:`spread ${period.label}` },
+            { label: t('analyticsPage.returnVsBtcLabel'), value: currentCoin ? `${currentCoin.price_change_percentage_7d_in_currency?.toFixed(2)}%` : '—', sub: t('analyticsPage.returnVsBtcSub') },
           ].map(r => (
             <div key={r.label} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)' }}>
               <div>
@@ -134,13 +135,13 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="card">
-          <div style={{ fontSize:13, color:'var(--text-muted)', fontWeight:600, marginBottom:16 }}>DATOS DE MERCADO LIVE</div>
+          <div style={{ fontSize:13, color:'var(--text-muted)', fontWeight:600, marginBottom:16 }}>{t('analyticsPage.liveMarketDataTitle')}</div>
           {currentCoin && [
-            { label:'Market Cap', value:`$${(currentCoin.market_cap/1e9).toFixed(2)}B` },
-            { label:'Volumen 24h', value:`$${(currentCoin.total_volume/1e9).toFixed(2)}B` },
-            { label:'Ranking', value:`#${currentCoin.market_cap_rank}` },
-            { label:'ATH', value: fmtP(currentCoin.ath) },
-            { label:'Desde ATH', value:`${currentCoin.ath_change_percentage?.toFixed(1)}%` },
+            { label: t('analyticsPage.marketCapLabel'), value:`$${(currentCoin.market_cap/1e9).toFixed(2)}B` },
+            { label: t('analyticsPage.volume24hLabel'), value:`$${(currentCoin.total_volume/1e9).toFixed(2)}B` },
+            { label: t('analyticsPage.rankingLabel'), value:`#${currentCoin.market_cap_rank}` },
+            { label: t('analyticsPage.athLabel'), value: fmtP(currentCoin.ath) },
+            { label: t('analyticsPage.sinceAthLabel'), value:`${currentCoin.ath_change_percentage?.toFixed(1)}%` },
           ].map(r => (
             <div key={r.label} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)' }}>
               <div style={{ fontSize:13, fontWeight:500 }}>{r.label}</div>

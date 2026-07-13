@@ -5,15 +5,17 @@ import { api } from '../api';
 import { CoinTable } from '../components/common/CoinTable';
 import { PageHeader } from '../components/common/PageHeader';
 import { EmptyState, SyncBadge } from '../components/common/StateViews';
+import { useTranslation } from '../i18n/I18nContext';
 import toast from 'react-hot-toast';
 
 const DEFAULTS    = ['bitcoin','ethereum','solana','binancecoin','ripple','cardano'];
 const STORAGE_KEY = 'kukora_watchlist_v1';
 
 const ls_load = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || JSON.stringify(DEFAULTS)); } catch { return DEFAULTS; } };
-const ls_save = l  => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(l)); } catch {} };
+const ls_save = l  => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(l)); } catch { /* localStorage no disponible — watchlist solo en memoria */ } };
 
 export default function WatchlistPage() {
+  const { t } = useTranslation();
   const [list,      setList]      = useState(ls_load);
   const [serverOk,  setServerOk]  = useState(false);
   const [search,    setSearch]    = useState('');
@@ -44,8 +46,8 @@ export default function WatchlistPage() {
     const next   = adding ? [...list, id] : list.filter(x => x !== id);
     setList(next);
     ls_save(next);
-    try { if (serverOk) await api.watchlist.save(next); } catch {}
-    toast.success(adding ? '★ Agregado a watchlist' : 'Eliminado de watchlist');
+    try { if (serverOk) await api.watchlist.save(next); } catch { /* server sync falla — watchlist ya guardada en localStorage */ }
+    toast.success(adding ? t('watchlist.toastAdded') : t('watchlist.toastRemoved'));
   };
 
   const suggestions = search.length > 1
@@ -59,15 +61,15 @@ export default function WatchlistPage() {
   return (
     <div className="page-enter">
       <PageHeader
-        title="Watchlist"
-        description="Tus activos favoritos · actualización cada 30s"
+        title={t('watchlist.title')}
+        description={t('watchlist.description')}
         live
         badge={serverOk ? 'MongoDB' : 'Local'}
         badgeColor={serverOk ? 'var(--color-green)' : 'var(--color-yellow)'}
         actions={
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <SyncBadge serverAvailable={serverOk} />
-            <input className="input" placeholder="Buscar y agregar…" style={{ width: 190 }}
+            <input className="input" placeholder={t('watchlist.searchPlaceholder')} style={{ width: 190 }}
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
         }
@@ -76,7 +78,7 @@ export default function WatchlistPage() {
       {/* Search suggestions */}
       {suggestions.length > 0 && (
         <div className="card" style={{ marginBottom: 16, padding: '8px 12px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Agregar a watchlist</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{t('watchlist.addSectionTitle')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {suggestions.map(c => (
               <button key={c.id} onClick={() => { toggle(c.id); setSearch(''); }}
@@ -97,18 +99,18 @@ export default function WatchlistPage() {
       {loading && !coins.length ? (
         <div style={{ textAlign: 'center', padding: 60 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
       ) : coins.length === 0 ? (
-        <EmptyState icon="★" title="Tu watchlist está vacía"
-          description="Busca un activo arriba para agregarlo a tu lista de seguimiento"
-          action="Ver mercados" onAction={() => window.location.href = '/markets'} />
+        <EmptyState icon="★" title={t('watchlist.emptyTitle')}
+          description={t('watchlist.emptyDescription')}
+          action={t('watchlist.emptyAction')} onAction={() => window.location.href = '/markets'} />
       ) : (
         <>
           <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
             <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 13, fontWeight: 700 }}>
-                {coins.length} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>activos en seguimiento</span>
+                {coins.length} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{t('watchlist.assetsTracked')}</span>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={() => { setList([]); ls_save([]); if (serverOk) api.watchlist.save([]); }}
-                style={{ fontSize: 11 }}>Limpiar todo</button>
+                style={{ fontSize: 11 }}>{t('watchlist.clearAll')}</button>
             </div>
             <CoinTable coins={coins} onSelect={c => toggle(c.id)} compact />
           </div>

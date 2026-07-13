@@ -21,7 +21,7 @@ const fmtPct = n => n == null ? '—' : `${n>=0?'+':''}${n.toFixed(2)}%`;
 const fmtN   = n => n == null ? '—' : n>=1 ? n.toLocaleString('en',{maximumFractionDigits:4}) : n.toFixed(6);
 
 const ls_load = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]'); } catch { return []; } };
-const ls_save = p => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch {} };
+const ls_save = p => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* localStorage no disponible (modo privado o cuota llena) — ignorar */ } };
 
 // Normalize server holding → local shape
 const norm = h => ({
@@ -69,19 +69,19 @@ export default function PortfolioPage() {
         (d?.coins || []).forEach(c => { map[c.id] = { price:c.current_price, change24h:c.price_change_percentage_24h, image:c.image, name:c.name, symbol:c.symbol?.toUpperCase() }; });
         // For any missing ids, fetch individually
         const missing = ids.filter(id => !map[id]);
-        return Promise.all(missing.map(id =>
+        return Promise.all(missing.map(() =>
           api.get(`/api/crypto/markets?limit=100`).catch(() => null)
         )).then(() => map);
       })
       .then(map => { setPrices(map); setPL(false); })
       .catch(() => setPL(false));
-  }, [holdings.length]);
+  }, [holdings]);
 
   // ── Add holding ───────────────────────────────────────────────────────────
   const addHolding = async () => {
     const amount   = parseFloat(form.amount);
     const avgPrice = parseFloat(form.avgPrice);
-    if (!form.coinId || isNaN(amount) || amount <= 0) { toast.error('Completa los campos correctamente'); return; }
+    if (!form.coinId || isNaN(amount) || amount <= 0) { toast.error('Please fill in all fields correctly'); return; }
     const coin = POPULAR.find(c => c.id === form.coinId);
 
     // Merge if existing
@@ -91,9 +91,9 @@ export default function PortfolioPage() {
       const totalAmt  = old.amount + amount;
       const totalCost = old.amount*(old.avgPrice||0) + amount*(avgPrice||0);
       const merged    = { ...old, amount:totalAmt, avgPrice:avgPrice?totalCost/totalAmt:old.avgPrice };
-      const next = holdings.map((h,i) => i===existingIdx ? merged : h);
+      const next = holdings.map((h, idx) => idx===existingIdx ? merged : h);
       setHoldings(next); ls_save(next);
-      toast.success('Posición promediada');
+      toast.success('Position averaged down');
       setForm(f => ({ ...f, amount:'', avgPrice:'' })); setShowAdd(false); return;
     }
 
@@ -110,16 +110,16 @@ export default function PortfolioPage() {
         setHoldings(next); ls_save(next);
       }
       setForm(f => ({ ...f, amount:'', avgPrice:'' })); setShowAdd(false);
-      toast.success('Posición agregada');
-    } catch(e) { toast.error(e.message||'Error al agregar'); }
+      toast.success('Position added');
+    } catch(e) { toast.error(e.message || 'Failed to add position'); }
   };
 
   // ── Remove holding ────────────────────────────────────────────────────────
   const removeHolding = async (id) => {
     const next = holdings.filter(h => h.id !== id);
     setHoldings(next); ls_save(next);
-    try { if (serverOk) await api.portfolio.delete(id); } catch {}
-    toast.success('Posición eliminada');
+    try { if (serverOk) await api.portfolio.delete(id); } catch { /* best-effort server sync — localStorage already updated */ }
+    toast.success('Position removed');
   };
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -148,14 +148,14 @@ export default function PortfolioPage() {
     <div className="page-enter">
       <PageHeader
         title="Portfolio"
-        description="P&L en tiempo real · persistencia multi-sesión"
+        description="P&L in real time · persistencia multi-session"
         live={holdings.length>0}
         badge={serverOk ? 'MongoDB' : 'Local'}
         badgeColor={serverOk ? 'var(--color-green)' : 'var(--color-yellow)'}
-        help="Las posiciones se guardan en MongoDB si está disponible. En modo local, solo persisten en este navegador."
+        help="Las positions se guardan en MongoDB si está available. En modo local, solo persisten en este navegador."
         actions={
           <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(s => !s)}>
-            {showAdd ? '✕ Cancelar' : '+ Agregar posición'}
+            {showAdd ? '✕ Cancel' : '+ Add position'}
           </button>
         }
       />
@@ -163,29 +163,29 @@ export default function PortfolioPage() {
       {/* Add form */}
       {showAdd && (
         <div className="card" style={{ marginBottom:20, padding:'18px 20px', border:'1px solid rgba(255,45,120,0.2)' }}>
-          <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>Nueva posición</div>
+          <div style={{ fontSize:13, fontWeight:700, marginBottom:14 }}>New position</div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12, marginBottom:14 }}>
             <div>
-              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>Activo</div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>Asset</div>
               <select style={sel} value={form.coinId} onChange={e => setForm(f => ({ ...f, coinId:e.target.value }))}>
                 {POPULAR.map(c => <option key={c.id} value={c.id}>{c.symbol} · {c.id}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>Cantidad</div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>Quantity</div>
               <input className="input" type="number" placeholder="ej. 0.5" min="0" step="any"
                 value={form.amount} onChange={e => setForm(f => ({ ...f, amount:e.target.value }))} />
             </div>
             <div>
               <div style={{ fontSize:10, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>
-                Precio entrada ($) <span style={{ fontWeight:400, color:'var(--text-dim)' }}>opcional</span>
+                Price entrada ($) <span style={{ fontWeight:400, color:'var(--text-dim)' }}>optional</span>
               </div>
               <input className="input" type="number" placeholder="ej. 45000" min="0" step="any"
                 value={form.avgPrice} onChange={e => setForm(f => ({ ...f, avgPrice:e.target.value }))} />
             </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <button className="btn btn-primary btn-sm" onClick={addHolding}>Agregar</button>
+            <button className="btn btn-primary btn-sm" onClick={addHolding}>Add</button>
             <SyncBadge serverAvailable={serverOk} />
           </div>
         </div>
@@ -195,8 +195,8 @@ export default function PortfolioPage() {
         <SkeletonMetrics count={4} />
       ) : holdings.length === 0 ? (
         <EmptyState icon="◎" title="Tu portfolio está vacío"
-          description="Agrega tus posiciones para ver el P&L en tiempo real y análisis de allocación"
-          action="+ Agregar primera posición" onAction={() => setShowAdd(true)} />
+          description="Agrega tus positions para ver el P&L in real time y analysis de allocación"
+          action="+ Add first position" onAction={() => setShowAdd(true)} />
       ) : (
         <>
           {/* KPI Summary */}
@@ -205,9 +205,9 @@ export default function PortfolioPage() {
               { label:'Valor Total',     value:fmt(totalValue),    color:'var(--text)' },
               { label:'Costo Base',      value:fmt(totalCost),     color:'var(--text-muted)' },
               { label:'P&L Total',       value:fmt(totalPnL),      color:totalPnL>=0?'var(--color-green)':'var(--color-red)', sub:fmtPct(totalPnLPct) },
-              { label:'Mejor posición',  value:best?.symbol||'—',  color:'var(--color-green)', sub:fmtPct(best?.pnlPct) },
-              { label:'Peor posición',   value:worst?.symbol||'—', color:'var(--color-red)',   sub:fmtPct(worst?.pnlPct) },
-              { label:'Posiciones',      value:holdings.length,    color:'var(--color-blue)' },
+              { label:'Mejor position',  value:best?.symbol||'—',  color:'var(--color-green)', sub:fmtPct(best?.pnlPct) },
+              { label:'Peor position',   value:worst?.symbol||'—', color:'var(--color-red)',   sub:fmtPct(worst?.pnlPct) },
+              { label:'Positions',      value:holdings.length,    color:'var(--color-blue)' },
             ].map(({ label, value, color, sub }) => (
               <div key={label} className="card" style={{ padding:'14px 16px' }}>
                 <div style={{ fontSize:9, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:6 }}>{label}</div>
@@ -242,21 +242,21 @@ export default function PortfolioPage() {
                   </div>
                 </>
               ) : (
-                <div style={{ textAlign:'center', padding:40, color:'var(--text-dim)', fontSize:12 }}>Cargando precios…</div>
+                <div style={{ textAlign:'center', padding:40, color:'var(--text-dim)', fontSize:12 }}>Loading prices…</div>
               )}
             </div>
 
             {/* Holdings table */}
             <div className="card" style={{ padding:0, overflow:'hidden' }}>
               <div style={{ padding:'13px 18px', borderBottom:'1px solid var(--border)', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', gap:10 }}>
-                Posiciones {pricesLoading && <div className="spinner" style={{ width:14, height:14 }} />}
+                Positions {pricesLoading && <div className="spinner" style={{ width:14, height:14 }} />}
               </div>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ background:'var(--bg-surface-2)' }}>
-                      {['Activo','Cantidad','Precio Actual','Entrada','Valor','P&L','P&L %','24h',''].map(h => (
-                        <th key={h} style={{ padding:'8px 12px', textAlign:h==='Activo'?'left':'right', fontSize:9, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
+                      {['Asset','Quantity','Price Actual','Entrada','Valor','P&L','P&L %','24h',''].map(h => (
+                        <th key={h} style={{ padding:'8px 12px', textAlign:h==='Asset'?'left':'right', fontSize:9, fontWeight:700, color:'var(--text-dim)', textTransform:'uppercase', letterSpacing:'0.07em', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -295,7 +295,7 @@ export default function PortfolioPage() {
             </div>
           </div>
           <div style={{ fontSize:11, color:'var(--text-dim)', textAlign:'center' }}>
-            {serverOk ? '☁ Datos sincronizados con MongoDB · persisten entre sesiones y dispositivos' : '💾 Datos en localStorage · solo en este navegador. Levanta MongoDB para persistencia real.'}
+            {serverOk ? '☁ Datos sincronizados con MongoDB · persisten entre sessions y dispositivos' : '💾 Datos en localStorage · solo en este navegador. Levanta MongoDB para persistencia real.'}
           </div>
         </>
       )}

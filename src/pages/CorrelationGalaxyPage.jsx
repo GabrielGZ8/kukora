@@ -230,11 +230,11 @@ export default function CorrelationGalaxyPage() {
     <div className="page-enter">
       <PageHeader
         title="Correlation Galaxy"
-        description="Red de correlaciones animada · hover para ver valores · verde = positiva · rojo = negativa"
+        description="Red de correlations animada · hover para ver valores · verde = positiva · rojo = negativa"
         badge="LIVE"
         badgeColor="var(--color-blue)"
         live
-        help="Mueve el cursor sobre un nodo para ver sus correlaciones con todos los demás activos. Las líneas sólidas indican correlación fuerte."
+        help="Mueve el cursor sobre un nodo para ver sus correlations con todos los demás actives. Las líneas sólidas indican correlation fuerte."
       />
 
       {/* Controls */}
@@ -251,8 +251,8 @@ export default function CorrelationGalaxyPage() {
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0 }}>
           {[
-            { color: 'var(--color-green)', label: 'Correlación positiva' },
-            { color: 'var(--color-red)',   label: 'Correlación negativa' },
+            { color: 'var(--color-green)', label: 'Correlation positiva' },
+            { color: 'var(--color-red)',   label: 'Correlation negativa' },
           ].map(({ color, label }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
               <div style={{ width: 18, height: 2, background: color, borderRadius: 1 }} />
@@ -267,7 +267,7 @@ export default function CorrelationGalaxyPage() {
         {loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg-surface)', zIndex: 10 }}>
             <div className="spinner" />
-            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Calculando correlaciones…</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Calculando correlations…</div>
           </div>
         )}
 

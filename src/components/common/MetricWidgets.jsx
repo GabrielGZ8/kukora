@@ -10,7 +10,7 @@ export function TrendCard({ trend, strength, slope, label }) {
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tendencia</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Trend</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 40, height: 40, borderRadius: 'var(--radius)', background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: cfg.color }}>
           {cfg.icon}
@@ -34,7 +34,7 @@ export function VolatilityCard({ value, label }) {
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Volatilidad</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Volatility</div>
         <span style={{ fontSize: 10, fontWeight: 700, color, background: `${color}22`, padding: '2px 8px', borderRadius: 99 }}>{text}</span>
       </div>
       <div style={{ fontSize: 26, fontWeight: 900, color }}>{value != null ? `${value.toFixed(2)}%` : '—'}</div>
@@ -69,7 +69,7 @@ export function PerformanceCard({ totalReturn, sharpe, drawdown, period }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Performance {period && `· ${period}`}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {[
-          { label: 'Retorno total',    value: totalReturn != null ? `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%` : '—', color: retColor },
+          { label: 'Return total',    value: totalReturn != null ? `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%` : '—', color: retColor },
           { label: 'Max Drawdown',     value: drawdown != null ? `${drawdown.toFixed(2)}%` : '—', color: 'var(--color-red)' },
           { label: 'Sharpe Ratio',     value: sharpe ?? '—', color: sharpe > 1 ? 'var(--color-green)' : 'var(--text-muted)' },
         ].map(r => (

@@ -14,7 +14,7 @@ export default function LiveAnomalyBanner() {
         const data = await api.get(`/api/crypto/anomalies?coins=${COINS}&days=7`);
         const high = (data || []).filter(a => a.anomaly?.level === 'high');
         if (high.length > 0) { setAnomalies(high); setVisible(true); }
-      } catch {}
+      } catch { /* network error — banner stays hidden until next poll */ }
     };
     load();
     const id = setInterval(load, 120_000);
@@ -33,13 +33,13 @@ export default function LiveAnomalyBanner() {
   return (
     <div style={{
       position: 'fixed', bottom: 20, right: 20, zIndex: 999,
-      background: '#fff',
+      background: 'var(--bg-surface)',
       border: '1px solid rgba(240,62,62,0.25)',
       borderLeft: '3px solid var(--color-red)',
       borderRadius: 'var(--radius-lg)',
       padding: '12px 14px',
       maxWidth: 300, minWidth: 240,
-      boxShadow: '0 4px 24px rgba(0,0,0,0.10)',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
       animation: 'fadeSlideUp 0.25s ease',
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -51,7 +51,7 @@ export default function LiveAnomalyBanner() {
               letterSpacing: '0.06em', textTransform: 'uppercase',
               fontFamily: 'var(--font-mono)',
             }}>
-              {(a.symbol || a.id || '').toUpperCase()} · Anomalía
+              {(a.symbol || a.id || '').toUpperCase()} · Anomaly
             </span>
             <button
               onClick={() => setVisible(false)}
@@ -75,7 +75,7 @@ export default function LiveAnomalyBanner() {
           </div>
           {anomalies.length > 1 && (
             <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 6, textAlign: 'right' }}>
-              {current + 1} / {anomalies.length} alertas
+              {current + 1} / {anomalies.length} alerts
             </div>
           )}
         </div>

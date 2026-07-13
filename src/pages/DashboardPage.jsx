@@ -6,6 +6,8 @@ import { Sparkline } from '../components/common/Sparkline';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/common/PageHeader';
 import { MarketPulse } from '../components/common/MarketPulse';
+import ArbKpiPanel from '../components/common/ArbKpiPanel';
+import { useTranslation } from '../i18n/I18nContext';
 
 const fmtB = n => n >= 1e12 ? `$${(n/1e12).toFixed(2)}T` : `$${(n/1e9).toFixed(2)}B`;
 const fmtP = n => n == null ? '—' : `${n>=0?'+':''}${n.toFixed(2)}%`;
@@ -28,11 +30,11 @@ const REGIME_ICONS = {
   VOLATILE_UNCERTAINTY:  '~',
 };
 
-function calcFearGreed(coins) {
-  if (!coins.length) return { score: 50, label: 'Neutral', color: '#f59e0b' };
+function calcFearGreed(coins, t) {
+  if (!coins.length) return { score: 50, label: t('dashboard.neutral'), color: '#f59e0b' };
   // FIX: keep legitimate zero values; only exclude null/undefined/NaN
   const pcts = coins.map(c => c.price_change_percentage_24h).filter(v => v != null && !Number.isNaN(v));
-  if (!pcts.length) return { score: 50, label: 'Neutral', color: '#f59e0b' };
+  if (!pcts.length) return { score: 50, label: t('dashboard.neutral'), color: '#f59e0b' };
   const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length;
   const variance = pcts.reduce((a, b) => a + (b - mean) ** 2, 0) / pcts.length;
   const stdDev = Math.sqrt(variance);
@@ -42,11 +44,11 @@ function calcFearGreed(coins) {
   const breadthBonus = (positiveRatio - 0.5) * 40;
   const score = Math.round(Math.max(0, Math.min(100, momentumScore + breadthBonus - volPenalty)));
   let label, color;
-  if (score <= 25)      { label = 'Miedo Extremo'; color = '#f03e3e'; }
-  else if (score <= 45) { label = 'Miedo';          color = '#FF8C42'; }
-  else if (score <= 55) { label = 'Neutral';         color = '#f59e0b'; }
-  else if (score <= 75) { label = 'Codicia';         color = '#00b87a'; }
-  else                  { label = 'Codicia Extrema'; color = '#059669'; }
+  if (score <= 25)      { label = t('dashboard.fearExtreme');  color = '#f03e3e'; }
+  else if (score <= 45) { label = t('dashboard.fear');         color = '#FF8C42'; }
+  else if (score <= 55) { label = t('dashboard.neutral');      color = '#f59e0b'; }
+  else if (score <= 75) { label = t('dashboard.greed');        color = '#00b87a'; }
+  else                  { label = t('dashboard.greedExtreme'); color = '#059669'; }
   return { score, label, color };
 }
 
@@ -77,7 +79,7 @@ function FearGreedArc({ score, label, color }) {
   );
 }
 
-function RegimeBanner({ regime, kcs, onClick }) {
+function RegimeBanner({ regime, kcs, onClick, t }) {
   if (!regime) return null;
   const color = REGIME_COLORS[regime.id] || '#f59e0b';
   const icon  = REGIME_ICONS[regime.id]  || '◈';
@@ -112,7 +114,7 @@ function RegimeBanner({ regime, kcs, onClick }) {
         </div>
         <div>
           <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>
-            Kukora AI · Régimen de Mercado
+            {t('dashboard.kukoraAiRegime')}
           </div>
           <div style={{ fontSize: 15, fontWeight: 800, color, lineHeight: 1 }}>{regime.label}</div>
         </div>
@@ -121,7 +123,7 @@ function RegimeBanner({ regime, kcs, onClick }) {
       {/* Confidence bar */}
       <div style={{ flex: '1 1 140px', minWidth: 120 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600 }}>Confianza</span>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600 }}>{t('dashboard.confidence')}</span>
           <span style={{ fontSize: 10, fontWeight: 800, color, fontFamily: 'var(--font-mono)' }}>{regime.confidence}%</span>
         </div>
         <div style={{ height: 5, background: 'var(--bg-surface-3)', borderRadius: 99, overflow: 'hidden' }}>
@@ -136,17 +138,17 @@ function RegimeBanner({ regime, kcs, onClick }) {
       {kcs && (
         <div style={{ display: 'flex', gap: 16, flexShrink: 0 }}>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>KCS</div>
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{t('dashboard.kcs')}</div>
             <div style={{ fontSize: 24, fontWeight: 900, color: kcs.color, fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{kcs.score}</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Estado</div>
+            <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{t('dashboard.status')}</div>
             <div style={{ fontSize: 10, fontWeight: 800, color: kcs.color, background: `${kcs.color}15`, padding: '3px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{kcs.state}</div>
           </div>
         </div>
       )}
 
-      <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>Ver detalle →</span>
+      <span style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>{t('dashboard.viewDetail')}</span>
     </div>
   );
 }
@@ -180,8 +182,9 @@ function MoverRow({ coin: c, up }) {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { data: mkt,  loading: mL } = usePolling(() => api.markets(50),   30000);
-  const { data: g,    loading: gL } = usePolling(() => api.global(),       60000);
+  const { t } = useTranslation();
+  const { data: mkt,  loading: mL, error: mktErr, refetch: refetchMkt } = usePolling(() => api.markets(50),   30000);
+  const { data: g,    loading: gL, error: gErr,   refetch: refetchG   } = usePolling(() => api.global(),       60000);
   const { data: ov               } = usePolling(() => api.overview(),      60000);
   const { data: rd               } = usePolling(
     () => api.get('/api/crypto/regime?coins=bitcoin,ethereum,solana,binancecoin,ripple&days=30'),
@@ -197,7 +200,7 @@ export default function DashboardPage() {
   const vol24   = g?.total_volume?.usd;
   const active  = g?.active_cryptocurrencies;
 
-  const fg = calcFearGreed(coins);
+  const fg = calcFearGreed(coins, t);
   const positiveCoins = coins.filter(c => (c.price_change_percentage_24h || 0) > 0).length;
   const breadthPct = coins.length ? Math.round(positiveCoins / coins.length * 100) : 0;
 
@@ -205,19 +208,57 @@ export default function DashboardPage() {
     .sort((a, b) => (b.anomaly?.score || 0) - (a.anomaly?.score || 0))
     .slice(0, 3);
 
+  const fearGreedZones = [
+    { r: [0,25],  l: t('dashboard.fearExtreme'), c: '#f03e3e' },
+    { r: [25,45], l: t('dashboard.fear'),          c: '#FF8C42' },
+    { r: [45,55], l: t('dashboard.neutral'),         c: '#f59e0b' },
+    { r: [55,75], l: t('dashboard.greed'),         c: '#00b87a' },
+    { r: [75,100],l: t('dashboard.greedExtreme'),         c: '#059669' },
+  ];
+
   return (
     <div className="page-enter">
       <PageHeader
-        title="Dashboard"
-        description="Vista general del mercado · actualización en vivo"
+        title={t('dashboard.title')}
+        description={t('dashboard.description')}
         live
       />
+
+      {/* Área 4 fix: usePolling already tracked fetch errors, but neither
+          error nor a retry path ever reached the UI — on a failed request
+          the page just quietly kept (or never got) data, with nothing to
+          tell the user something was wrong. */}
+      {(mktErr || gErr) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          background: 'var(--color-red-dim)', border: '1px solid rgba(240,62,62,0.3)',
+          borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16,
+        }}>
+          <span style={{ fontSize: 16 }}>⚠</span>
+          <span style={{ fontSize: 12, color: 'var(--color-red)', fontWeight: 600 }}>
+            {mktErr && gErr ? t('dashboard.errorBoth')
+              : mktErr ? t('dashboard.errorMarket')
+              : t('dashboard.errorGlobal')}
+            {' '}{(mkt || g) ? t('dashboard.errorStale') : t('dashboard.errorRetrying')}
+          </span>
+          <button
+            className="btn btn-sm btn-secondary"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => { if (mktErr) refetchMkt(); if (gErr) refetchG(); }}
+          >
+            {t('dashboard.retryNow')}
+          </button>
+        </div>
+      )}
+
+      <ArbKpiPanel />
 
       {/* AI Regime Banner */}
       <RegimeBanner
         regime={rd?.consensus}
         kcs={rd?.kcs}
         onClick={() => navigate('/regime')}
+        t={t}
       />
 
       {/* Live Market Pulse */}
@@ -225,10 +266,10 @@ export default function DashboardPage() {
 
       {/* KPI metrics */}
       <MetricGrid>
-        <MetricCard label="Market Cap Total"  value={gL ? '…' : fmtB(mcap || 0)}             icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} accent="primary" loading={gL} trend={mcapChg} />
-        <MetricCard label="Volumen 24h"        value={gL ? '…' : fmtB(vol24 || 0)}             icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>} accent="blue"    loading={gL} />
-        <MetricCard label="Dominancia BTC"     value={gL ? '…' : `${btcDom?.toFixed(1)}%`}     icon="₿"  accent="yellow"  loading={gL} sub="del mercado total" />
-        <MetricCard label="Cryptos Activas"    value={gL ? '…' : active?.toLocaleString()}      icon="◈"  accent="purple"  loading={gL} />
+        <MetricCard label={t('dashboard.marketCapTotal')}  value={gL ? '…' : fmtB(mcap || 0)}             icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} accent="primary" loading={gL} trend={mcapChg} />
+        <MetricCard label={t('dashboard.volume24h')}        value={gL ? '…' : fmtB(vol24 || 0)}             icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>} accent="blue"    loading={gL} />
+        <MetricCard label={t('dashboard.btcDominance')}     value={gL ? '…' : `${btcDom?.toFixed(1)}%`}     icon="₿"  accent="yellow"  loading={gL} sub={t('dashboard.ofTotalMarket')} />
+        <MetricCard label={t('dashboard.activeCryptos')}    value={gL ? '…' : active?.toLocaleString()}      icon="◈"  accent="purple"  loading={gL} />
       </MetricGrid>
 
       {/* Fear & Greed + Breadth */}
@@ -237,18 +278,12 @@ export default function DashboardPage() {
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <FearGreedArc score={fg.score} label={fg.label} color={fg.color} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>Fear & Greed Index</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{t('dashboard.fearGreedTitle')}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.4 }}>
-              Calculado desde volatilidad y momentum del mercado en tiempo real
+              {t('dashboard.fearGreedDescription')}
             </div>
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {[
-                { r: [0,25],  l: 'Miedo Extremo', c: '#f03e3e' },
-                { r: [25,45], l: 'Miedo',          c: '#FF8C42' },
-                { r: [45,55], l: 'Neutral',         c: '#f59e0b' },
-                { r: [55,75], l: 'Codicia',         c: '#00b87a' },
-                { r: [75,100],l: 'Extrema',         c: '#059669' },
-              ].map(z => (
+              {fearGreedZones.map(z => (
                 <span key={z.l} style={{
                   fontSize: 9, fontWeight: 700, color: z.c,
                   background: `${z.c}15`, padding: '2px 7px', borderRadius: 99,
@@ -264,9 +299,9 @@ export default function DashboardPage() {
 
         {/* Market Breadth */}
         <div className="card">
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Market Breadth 24h</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{t('dashboard.marketBreadthTitle')}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
-            {positiveCoins} de {coins.length} activos en positivo
+            {t('dashboard.ofActivesPositive').replace('{total}', coins.length)} ({positiveCoins})
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
             <div style={{
@@ -287,20 +322,20 @@ export default function DashboardPage() {
                 }} />
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {breadthPct > 66 ? 'Mercado mayoritariamente alcista'
-                  : breadthPct > 50 ? 'Leve sesgo positivo'
-                  : breadthPct > 33 ? 'Leve sesgo negativo'
-                  : 'Mercado mayoritariamente bajista'}
+                {breadthPct > 66 ? t('dashboard.bullishMajority')
+                  : breadthPct > 50 ? t('dashboard.slightPositiveBias')
+                  : breadthPct > 33 ? t('dashboard.slightNegativeBias')
+                  : t('dashboard.bearishMajority')}
               </div>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div style={{ background: 'var(--color-green-dim)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--color-green)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>↑ Positivos</div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--color-green)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>↑ {t('dashboard.positive')}</div>
               <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--color-green)', fontFamily: 'var(--font-mono)' }}>{positiveCoins}</div>
             </div>
             <div style={{ background: 'var(--color-red-dim)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--color-red)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>↓ Negativos</div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--color-red)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>↓ {t('dashboard.negative')}</div>
               <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--color-red)', fontFamily: 'var(--font-mono)' }}>{coins.length - positiveCoins}</div>
             </div>
           </div>
@@ -312,10 +347,10 @@ export default function DashboardPage() {
         <div className="card" style={{ marginBottom: 24 }}>
           <div className="section-header" style={{ marginBottom: 12 }}>
             <div>
-              <div className="section-title">Señales Detectadas</div>
-              <div className="section-sub">Top 3 por anomaly + intelligence score</div>
+              <div className="section-title">{t('dashboard.signalsDetected')}</div>
+              <div className="section-sub">{t('dashboard.signalsSubtitle')}</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/intelligence')}>Ver todas →</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/intelligence')}>{t('dashboard.viewAll')}</button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
             {topAnomalies.map(c => (
@@ -341,7 +376,7 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                  Trend: <b style={{ color: c.trendRaw === 'bullish' ? 'var(--color-green)' : c.trendRaw === 'bearish' ? 'var(--color-red)' : 'var(--color-yellow)' }}>{c.trend}</b>
+                  {t('dashboard.trend')}: <b style={{ color: c.trendRaw === 'bullish' ? 'var(--color-green)' : c.trendRaw === 'bearish' ? 'var(--color-red)' : 'var(--color-yellow)' }}>{c.trend}</b>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
                   24h: <b style={{ color: (c.change24h || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)', fontFamily: 'var(--font-mono)' }}>{fmtP(c.change24h)}</b>
@@ -357,8 +392,8 @@ export default function DashboardPage() {
         <div className="card">
           <div className="section-header">
             <div>
-              <div className="section-title">Top Gainers 24h</div>
-              <div className="section-sub">Mejor rendimiento del día</div>
+              <div className="section-title">{t('dashboard.topGainers')}</div>
+              <div className="section-sub">{t('dashboard.topGainersSubtitle')}</div>
             </div>
           </div>
           {mL
@@ -369,8 +404,8 @@ export default function DashboardPage() {
         <div className="card">
           <div className="section-header">
             <div>
-              <div className="section-title"> Top Losers 24h</div>
-              <div className="section-sub">Mayor caída del día</div>
+              <div className="section-title"> {t('dashboard.topLosers')}</div>
+              <div className="section-sub">{t('dashboard.topLosersSubtitle')}</div>
             </div>
           </div>
           {mL
@@ -384,12 +419,12 @@ export default function DashboardPage() {
       <div className="card">
         <div className="section-header" style={{ marginBottom: 16 }}>
           <div>
-            <div className="section-title">Mercados · Top 50</div>
-            <div className="section-sub">Por market cap · actualización cada 30s</div>
+            <div className="section-title">{t('dashboard.marketsTop50')}</div>
+            <div className="section-sub">{t('dashboard.marketsSubtitle')}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div className="pulse-dot" />
-            <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>LIVE</span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>{t('dashboard.live')}</span>
           </div>
         </div>
         <CoinTable coins={coins} />

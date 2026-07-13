@@ -1,4 +1,4 @@
-// RankingTable.jsx — tabla de ranking reutilizable
+// RankingTable.jsx — table de ranking reutilizable
 // Props: items: [{ id, name, symbol?, image?, score, label, labelColor, change24h?, price? }]
 //        title?, onSelect?
 
@@ -10,12 +10,12 @@ export default function RankingTable({ items = [], title = 'Ranking', onSelect }
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>{title}</div>
       {items.length === 0 ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>Sin datos</div>
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>No data</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--bg-surface-2)' }}>
-              {['#', 'Asset', 'Score', 'Label', 'Momentum', 'Volatilidad', 'Performance'].map(h => (
+              {['#', 'Asset', 'Score', 'Label', 'Momentum', 'Volatility', 'Performance'].map(h => (
                 <th key={h} style={{ padding: '9px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr>

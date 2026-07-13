@@ -13,9 +13,9 @@ const COINS = [
 ];
 
 const STRATEGIES = [
-  { id: 'sma_crossover',      label: 'SMA Crossover',      desc: 'Compra SMA10 cruza SMA30 ↑, vende al cruzar ↓' },
+  { id: 'sma_crossover',      label: 'SMA Crossover',      desc: 'Long when SMA10 crosses above SMA30, exit when it crosses below' },
   { id: 'rsi_reversion',      label: 'RSI Mean Reversion', desc: 'Compra RSI < 30, vende RSI > 70' },
-  { id: 'bollinger_breakout', label: 'Bollinger Breakout',  desc: 'Compra al romper banda superior, vende en media' },
+  { id: 'bollinger_breakout', label: 'Bollinger Breakout',  desc: 'Compra al romper band superior, vende en media' },
 ];
 
 const fmt = (n) => n == null ? '—' : n >= 1 ? `$${n.toLocaleString('en', { maximumFractionDigits: 2 })}` : `$${n?.toFixed(5)}`;
@@ -113,39 +113,37 @@ export default function BacktestPage() {
   // Entry/exit markers
   const trades = data?.strategy?.trades || [];
 
-  const displayedResult = allData && activeStrategy ? allData[activeStrategy] : data?.strategy;
-
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: '-0.5px', marginBottom: 4 }}>
           <span style={{ background: 'var(--brand-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Backtesting</span> Engine
         </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Simulación de estrategias sobre datos históricos reales</p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Strategy simulation on real historical data</p>
       </div>
 
       {/* Controls */}
       <div style={{ ...cardStyle, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
         <div>
-          <span style={labelStyle}>Activo</span>
+          <span style={labelStyle}>Asset</span>
           <select style={selectStyle} value={coin} onChange={e => setCoin(e.target.value)}>
             {COINS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
         </div>
         <div>
-          <span style={labelStyle}>Estrategia</span>
+          <span style={labelStyle}>Strategy</span>
           <select style={selectStyle} value={strategy} onChange={e => setStrategy(e.target.value)}>
             {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </div>
         <div>
-          <span style={labelStyle}>Período</span>
+          <span style={labelStyle}>Period</span>
           <select style={selectStyle} value={days} onChange={e => setDays(Number(e.target.value))}>
-            {[60, 90, 180, 365].map(d => <option key={d} value={d}>{d} días</option>)}
+            {[60, 90, 180, 365].map(d => <option key={d} value={d}>{d} days</option>)}
           </select>
         </div>
         <button className="btn btn-primary" onClick={run} disabled={loading} style={{ height: 38 }}>
-          {loading ? '⟳ Ejecutando...' : '▶ Ejecutar backtest'}
+          {loading ? '⟳ Running...' : '▶ Run backtest'}
         </button>
       </div>
 
@@ -167,7 +165,7 @@ export default function BacktestPage() {
       {loading && (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <div className="spinner" style={{ margin: '0 auto 12px' }} />
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Simulando {days} días de trading…</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Simulando {days} days de trading…</div>
         </div>
       )}
 
@@ -176,7 +174,7 @@ export default function BacktestPage() {
           {/* Strategy comparison cards */}
           {allData && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Comparativa de Estrategias</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Comparativa de Strategys</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                 {STRATEGIES.map(s => (
                   <StrategyCard
@@ -193,7 +191,7 @@ export default function BacktestPage() {
 
           {/* KPI metrics */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 20 }}>
-            <MetricBadge label="Retorno Total" value={fmtPct(data.strategy.totalReturn)} accent={data.strategy.totalReturn >= 0 ? 'var(--color-green)' : 'var(--color-red)'} />
+            <MetricBadge label="Return Total" value={fmtPct(data.strategy.totalReturn)} accent={data.strategy.totalReturn >= 0 ? 'var(--color-green)' : 'var(--color-red)'} />
             <MetricBadge label="Buy & Hold" value={fmtPct(data.benchmark?.totalReturn)} accent={data.benchmark?.totalReturn >= 0 ? 'var(--color-green)' : 'var(--color-red)'} />
             <MetricBadge label="Win Rate" value={data.strategy.winRate != null ? `${data.strategy.winRate}%` : '—'} accent="var(--color-blue)" />
             <MetricBadge label="Total Trades" value={data.strategy.totalTrades} />
@@ -201,7 +199,7 @@ export default function BacktestPage() {
             <MetricBadge label="Sharpe Ratio" value={data.strategy.sharpeRatio?.toFixed(3) || '—'} accent="var(--color-purple)" />
             <div style={{display:'flex',gap:6,gridColumn:'span 2'}}>
               <button className="btn btn-ghost btn-sm" onClick={()=>exportCSV(equityData,'kukora_equity.csv')}>↓ Equity CSV</button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON(data,'kukora_backtest.json')}>↓ Resultados JSON</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON(data,'kukora_backtest.json')}>↓ Results JSON</button>
             </div>
           </div>
 
@@ -215,7 +213,7 @@ export default function BacktestPage() {
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={equityData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
-                <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--text-dim)' }} label={{ value: 'Días', position: 'insideRight', offset: -4, fontSize: 10 }} />
+                <XAxis dataKey="i" tick={{ fontSize: 10, fill: 'var(--text-dim)' }} label={{ value: 'Days', position: 'insideRight', offset: -4, fontSize: 10 }} />
                 <YAxis tickFormatter={v => `$${(v/1000).toFixed(1)}k`} tick={{ fontSize: 10, fill: 'var(--text-dim)' }} width={58} />
                 <Tooltip
                   contentStyle={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
@@ -238,7 +236,7 @@ export default function BacktestPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border-bright)' }}>
-                      {['#', 'Entrada', 'Salida', 'P&L %', 'Duración', 'Estado'].map(h => (
+                      {['#', 'Entrada', 'Salida', 'P&L %', 'Duration', 'Status'].map(h => (
                         <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{h}</th>
                       ))}
                     </tr>
@@ -274,8 +272,8 @@ export default function BacktestPage() {
       {!data && !loading && !error && (
         <div style={{ ...cardStyle, textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>◎</div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>Selecciona un activo y estrategia para iniciar</div>
-          <div style={{ fontSize: 12, marginTop: 8 }}>Simulación sobre datos históricos reales de CoinGecko</div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>Select un active y strategy para iniciar</div>
+          <div style={{ fontSize: 12, marginTop: 8 }}>Simulation sobre datos históricos reales de CoinGecko</div>
         </div>
       )}
     </div>

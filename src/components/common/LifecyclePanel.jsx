@@ -1,5 +1,5 @@
 /**
- * LifecyclePanel.jsx — Kukora Hackathon
+ * LifecyclePanel.jsx — Kukora
  *
  * Displays:
  *   - Active opportunity lifecycles (firstSeen, duration, seenCount)
@@ -17,7 +17,7 @@ const fmtMs = ms => {
 const ago = ts => {
   if (!ts) return '—';
   const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 2) return 'ahora'; if (s < 60) return `${s}s`; return `${Math.floor(s / 60)}m`;
+  if (s < 2) return 'ahour'; if (s < 60) return `${s}s`; return `${Math.floor(s / 60)}m`;
 };
 
 const EX_COLORS = { Binance: '#F0B90B', Kraken: '#5741D9', Bybit: '#F7A600', Coinbase: '#0052FF', OKX: '#aaa' };
@@ -51,18 +51,27 @@ export default function LifecyclePanel({ data }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+      {/* ── NARRATIVE HEADER ──────────────────────────────────────────────── */}
+      <div style={{ background:'rgba(255,45,120,0.06)', border:'1px solid rgba(255,45,120,0.18)', borderRadius:10, padding:'10px 16px', display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ fontSize:18, flexShrink:0 }}>📈</div>
+        <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.5 }}>
+          <b style={{ color:'var(--text)' }}>Trades & Execution — History audited.</b>{' '}
+          Each trade records end-to-end latency, fill ratio, gross spread before fees, real fees applied and net P&L. Also shows the full opportunity lifecycle: from detection through expiration or execution. This history is the source of truth for evaluating real engine performance.
+        </div>
+      </div>
+
       {/* Summary Row — Always rendered to prevent layout shifts */}
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10,
-        minHeight: 64, // Altura mínima fija para estabilizar el diseño
+        minHeight: 64, // Fixed minimum height for layout stability
       }}>
         {[
           { label: 'Total Expiradas',     value: summary.count?.toLocaleString() || '0', color: 'var(--text)' },
-          { label: 'Dur. Promedio',        value: summary.avgDurationMs ? fmtMs(summary.avgDurationMs) : '0ms', color: 'var(--color-green)' },
+          { label: 'Dur. Average',        value: summary.avgDurationMs ? fmtMs(summary.avgDurationMs) : '0ms', color: 'var(--color-green)' },
           { label: 'Apariciones Prom.',    value: summary.avgSeenCount?.toString() || '0', color: 'var(--color-green)' },
           { label: 'Spread Prom.',         value: summary.avgMaxSpread != null ? `${summary.avgMaxSpread}%` : '0%', color: 'var(--color-yellow)' },
           { label: 'Profit Prom.',         value: summary.avgMaxProfit != null ? `$${fmt4(summary.avgMaxProfit)}` : '$0.0000', color: (summary.avgMaxProfit || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
-          { label: 'Más Larga',            value: summary.longestMs ? fmtMs(summary.longestMs) : '0ms', color: 'var(--color-green)' },
+          { label: 'Longest',            value: summary.longestMs ? fmtMs(summary.longestMs) : '0ms', color: 'var(--color-green)' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
             background: 'var(--bg-surface)', border: '1px solid var(--border)',
@@ -85,20 +94,20 @@ export default function LifecyclePanel({ data }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <span style={{ fontWeight: 800, fontSize: 13 }}>
-            ⚡ Oportunidades Activas
+            ⚡ Active Opportunities
           </span>
           <span style={{ fontSize: 10, color: active.length > 0 ? 'var(--color-green)' : 'var(--text-dim)', fontWeight: 700 }}>
-            {active.length} en seguimiento
+            {active.length} en tracking
           </span>
         </div>
         {active.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-            Sin oportunidades activas en este momento
+            Sin opportunities activas en este momento
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ background: 'var(--bg-surface-2)' }}>
-              {['Estado', 'Par', 'Primer Visto', 'Duración', 'Apariciones', 'Max Spread', 'Max Profit'].map(h => (
+              {['Status', 'Par', 'Primer Visto', 'Duration', 'Apariciones', 'Max Spread', 'Max Profit'].map(h => (
                 <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
               ))}
             </tr></thead>
@@ -133,17 +142,17 @@ export default function LifecyclePanel({ data }) {
       }}>
         <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
           <span style={{ fontWeight: 800, fontSize: 13 }}>
-            🕐 Historial de Oportunidades Expiradas
+            🕐 Expired Opportunity History
           </span>
         </div>
         {history.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-            El historial aparece aquí a medida que las oportunidades expiran
+            History appears here as opportunities expire
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ background: 'var(--bg-surface-2)' }}>
-              {['Par', 'Duración', 'Apariciones', 'Max Spread', 'Max Profit', 'Viable', 'Visto Hace'].map(h => (
+              {['Par', 'Duration', 'Apariciones', 'Max Spread', 'Max Profit', 'Viable', 'Visto Hace'].map(h => (
                 <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
               ))}
             </tr></thead>

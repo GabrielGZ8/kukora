@@ -57,7 +57,7 @@ export function SkeletonMetrics({ count = 4 }) {
 // ── Error state ────────────────────────────────────────────────────────────
 export function ErrorState({ error, onRetry, style = {} }) {
   const isRateLimit = error?.includes('Rate limit') || error?.includes('429');
-  const isNetwork   = error?.includes('CoinGecko no disponible') || error?.includes('502');
+  const isNetwork   = error?.includes('CoinGecko no available') || error?.includes('502');
 
   return (
     <div style={{
@@ -75,15 +75,15 @@ export function ErrorState({ error, onRetry, style = {} }) {
       </div>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
         {isRateLimit ? 'Rate limit alcanzado'
-          : isNetwork ? 'Sin conexión con CoinGecko'
-          : 'Error al cargar datos'}
+          : isNetwork ? 'No connection con CoinGecko'
+          : 'Error al load datos'}
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 320, margin: '0 auto 18px', lineHeight: 1.55 }}>
-        {error || 'Ocurrió un error inesperado.'}
+        {error || 'An unexpected error occurred.'}
       </div>
       {onRetry && (
         <button className="btn btn-secondary btn-sm" onClick={onRetry}>
-          ↺ Reintentar
+          ↺ Retry
         </button>
       )}
     </div>

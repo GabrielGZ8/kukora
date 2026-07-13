@@ -1,6 +1,6 @@
 // ─── TooltipHint.jsx ──────────────────────────────────────────────────────
-// Tooltip contextual reutilizable con posicionamiento automático
-// Uso: <TooltipHint text="Explicación aquí"><button>?</button></TooltipHint>
+// Tooltip contextual reutilizable con posicionamiento automatic
+// Usage: <TooltipHint text="Explanation here"><button>?</button></TooltipHint>
 // Props: text, position ('top'|'bottom'|'left'|'right'), maxWidth, children
 
 import { useState, useRef, useEffect } from 'react';
@@ -99,7 +99,7 @@ export function TooltipHint({ text, position = 'top', maxWidth = 220, children, 
 }
 
 // ─── HelpBadge ────────────────────────────────────────────────────────────
-// Botón de ayuda circular con tooltip — uso: <HelpBadge text="..." />
+// Button de ayuda circular con tooltip — uso: <HelpBadge text="..." />
 export function HelpBadge({ text, position = 'top' }) {
   return (
     <TooltipHint text={text} position={position}>

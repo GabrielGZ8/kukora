@@ -1,6 +1,6 @@
 // ─── ComparePage.jsx — Quick Asset Comparator ────────────────────────────
-// Compara hasta 4 activos: precios, retornos, correlación, volat., riesgo
-import { useState, useEffect, useRef } from 'react';
+// Compara until 4 actives: prices, returns, correlation, volat., risk
+import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { api } from '../api';
 import { PageHeader } from '../components/common/PageHeader';
@@ -24,7 +24,6 @@ const PERIODS = [
   { label: '90d', days: 90 },
 ];
 
-const fmt    = n => n == null ? '—' : n >= 1 ? `$${n.toLocaleString('en', { maximumFractionDigits: 2 })}` : `$${n.toFixed(5)}`;
 const fmtPct = n => n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 
 // Normalize prices to 100 at start
@@ -54,20 +53,6 @@ function CoinChip({ coin, selected, onToggle, disabled }) {
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: coin.color, flexShrink: 0 }} />
       {coin.label}
     </button>
-  );
-}
-
-function StatCell({ label, value, color, mono = true }) {
-  return (
-    <td style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
-      <div style={{
-        fontWeight: 700, fontSize: 13,
-        color: color || 'var(--text)',
-        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-ui)',
-      }}>
-        {value}
-      </div>
-    </td>
   );
 }
 
@@ -139,27 +124,19 @@ export default function ComparePage() {
     };
   });
 
-  const selectStyle = {
-    padding: '7px 12px', borderRadius: 'var(--radius)',
-    border: '1px solid var(--border-bright)',
-    background: 'var(--bg-surface)', color: 'var(--text)',
-    fontSize: 13, cursor: 'pointer', outline: 'none',
-    fontFamily: 'var(--font-ui)',
-  };
-
   return (
     <div className="page-enter">
       <PageHeader
         title="Asset Comparator"
-        description={`Compara hasta 4 activos · retornos normalizados · métricas de riesgo · ${period.label}`}
-        help="Los retornos se normalizan a 100 en el punto de inicio para comparar performance relativa sin importar el precio absoluto."
+        description={`Compara until 4 actives · returns normalizados · metrics de risk · ${period.label}`}
+        help="Los returns se normalizan a 100 en el punto de home para comparar performance relativa sin importar el price absoluto."
       />
 
       {/* Coin selector + period */}
       <div className="card" style={{ marginBottom: 20, padding: '16px 20px' }}>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-            Seleccionar activos <span style={{ color: 'var(--text-dim)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(máx. 4)</span>
+            Select actives <span style={{ color: 'var(--text-dim)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(max. 4)</span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             {ALL_COINS.map(c => (
@@ -192,8 +169,8 @@ export default function ComparePage() {
       {chartData.length > 0 && (
         <div className="card" style={{ marginBottom: 20, padding: '18px 20px' }}>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Retorno Relativo Normalizado</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Base 100 al inicio · mayor = mejor rendimiento</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Return Relativo Normalizado</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Base 100 al home · mayor = mejor performance</div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
@@ -202,8 +179,8 @@ export default function ComparePage() {
                 dataKey="i"
                 tickFormatter={v => {
                   const total = chartData.length;
-                  if (v === 0) return 'Inicio';
-                  if (v === total - 1) return 'Hoy';
+                  if (v === 0) return 'Home';
+                  if (v === total - 1) return 'Today';
                   return '';
                 }}
                 tick={{ fontSize: 10, fill: 'var(--text-dim)' }}
@@ -245,14 +222,14 @@ export default function ComparePage() {
       {stats.some(s => s.totalReturn != null) && (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Comparativa de Métricas</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Rendimiento y riesgo en el periodo seleccionado</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Comparativa de Metrics</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Performance y risk en el periodo selectdo</div>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface-2)' }}>
-                  <th style={{ padding: '9px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '1px solid var(--border)' }}>Métrica</th>
+                  <th style={{ padding: '9px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', borderBottom: '1px solid var(--border)' }}>Metric</th>
                   {selected.map(id => {
                     const coin = ALL_COINS.find(c => c.id === id);
                     return (
@@ -266,14 +243,14 @@ export default function ComparePage() {
               <tbody>
                 {[
                   {
-                    label: `Retorno ${period.label}`,
+                    label: `Return ${period.label}`,
                     get: s => s.totalReturn,
                     format: v => fmtPct(v),
                     color: v => v >= 0 ? 'var(--color-green)' : 'var(--color-red)',
                     best: 'max',
                   },
                   {
-                    label: 'Volatilidad Diaria (σ)',
+                    label: 'Volatility Diaria (σ)',
                     get: s => s.stdDev,
                     format: v => v != null ? `${v.toFixed(2)}%` : '—',
                     color: v => v < 3 ? 'var(--color-green)' : v < 6 ? 'var(--color-yellow)' : 'var(--color-red)',
@@ -294,14 +271,14 @@ export default function ComparePage() {
                     best: 'max',
                   },
                   {
-                    label: 'Mejor Día',
+                    label: 'Best Day',
                     get: s => s.best,
                     format: v => fmtPct(v),
                     color: () => 'var(--color-green)',
                     best: 'max',
                   },
                   {
-                    label: 'Peor Día',
+                    label: 'Worst Day',
                     get: s => s.worst,
                     format: v => fmtPct(v),
                     color: () => 'var(--color-red)',
@@ -316,7 +293,7 @@ export default function ComparePage() {
                       <td style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                         {row.label}
                       </td>
-                      {stats.map((s, i) => {
+                      {stats.map((s) => {
                         const v = row.get(s);
                         const isBest = v != null && v === bestVal && validVals.length > 1;
                         return (
@@ -346,7 +323,7 @@ export default function ComparePage() {
           </div>
           <div style={{ padding: '10px 20px', background: 'var(--bg-surface-2)', fontSize: 10, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: 'var(--color-green)', fontWeight: 800 }}>★</span>
-            Mejor valor en la categoría · Sharpe Ratio &gt; 1 = buena compensación riesgo/retorno
+            Mejor valor en la categoría · Sharpe Ratio &gt; 1 = buena compensación risk/return
           </div>
         </div>
       )}
@@ -354,8 +331,8 @@ export default function ComparePage() {
       {!chartData.length && !loading && (
         <div style={{ textAlign: 'center', padding: 80, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 40, opacity: 0.2, marginBottom: 12 }}>⬡</div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Selecciona al menos 2 activos</div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6 }}>Compara retornos, volatilidad y Sharpe Ratio</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Select al menos 2 actives</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6 }}>Compara returns, volatility y Sharpe Ratio</div>
         </div>
       )}
     </div>

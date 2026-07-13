@@ -1,31 +1,9 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
-
-# Build output
-dist/
-build/
-
-# Environment variables
+node_modules
 .env
 .env.local
 .env.*.local
-
-# Logs
-logs/
+!.env.example
+dist
+coverage
 *.log
-npm-debug.log*
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
-*.swp
-
-# Cache
-.vite/
-.eslintcache
+server/.secrets/

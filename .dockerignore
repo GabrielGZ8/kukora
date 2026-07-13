@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.local
+.git
+.github
+*.log
+.DS_Store
+.nvmrc
+.node-version

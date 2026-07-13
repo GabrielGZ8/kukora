@@ -1,5 +1,5 @@
 /**
- * IntelligencePanel.jsx — Kukora Hackathon
+ * IntelligencePanel.jsx — Kukora
  *
  * Shows:
  *   - Exchange Performance Ranking
@@ -11,7 +11,6 @@
  */
 
 const fmt4 = n => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(4);
-const fmt1 = n => (n == null || isNaN(n)) ? '—' : Number(n).toFixed(1);
 const fmtMs = ms => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 
 const EX_COLORS = { Binance: '#F0B90B', Kraken: '#5741D9', Bybit: '#F7A600', Coinbase: '#0052FF', OKX: '#aaa' };
@@ -64,10 +63,10 @@ function RiskStatus({ status, score }) {
         }} />
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
-        Basado en: varianza precio BTC (rolling 60 ticks) · movimiento corto plazo · inestabilidad de spread.
-        {score >= 70 && ' 🛑 Ejecución bloqueada por alto riesgo.'}
-        {score >= 35 && score < 70 && ' ⚠ Tamaño de posición reducido.'}
-        {score < 35 && ' Sistema operando normalmente.'}
+        Based on: BTC price variance (rolling 60 ticks) · short-term momentum · spread instability.
+        {score >= 70 && ' 🛑 Execution blocked — high risk.'}
+        {score >= 35 && score < 70 && ' ⚠ Position size reduced.'}
+        {score < 35 && ' System operando normalmente.'}
       </p>
     </div>
   );
@@ -132,11 +131,11 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
         {/* Exchange Performance Ranking */}
         <Section title=" Exchange Performance Ranking">
           {exRanking.length === 0 ? (
-            <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>Acumulando datos de sesión…</div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>Acumulando datos de session…</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead><tr style={{ background: 'var(--bg-surface-2)' }}>
-                {['#', 'Exchange', 'Opps', 'Ejecutadas', 'Win%', 'Latencia', 'Fill%'].map(h => (
+                {['#', 'Exchange', 'Opps', 'Ejecutadas', 'Win%', 'Latency', 'Fill%'].map(h => (
                   <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700, fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
@@ -171,7 +170,7 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
         {/* Reliability Leaderboard */}
         <Section title="🛡 Exchange Reliability Score">
           {reliability.length === 0 ? (
-            <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>Acumulando métricas WS…</div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>Acumulando metrics WS…</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {reliability.map((entry, i) => (
@@ -191,7 +190,7 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
                 </div>
               ))}
               <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0' }}>
-                Fórmula: WS uptime (40%) + Stale rate (30%) + Latencia (20%) + Reconexiones (10%)
+                Formula: WS uptime (40%) + Stale rate (30%) + Latency (20%) + Reconnections (10%)
               </p>
             </div>
           )}
@@ -213,13 +212,13 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
         <Section title=" Predictive Opportunity Ranking">
           {predicted.length === 0 ? (
             <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-              Las predicciones aparecen después de acumular detecciones históricas
+              Predictions appear after accumulating historical detections
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {predicted.map((pred, i) => <PredictiveCard key={pred.pair} pred={pred} rank={i} />)}
               <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0' }}>
-                Basado en: frecuencia histórica (35%) · win rate (40%) · latencia exchange (15%) · persistencia spread (10%)
+                Based on: historical frequency (35%) · win rate (40%) · exchange latency (15%) · spread persistence (10%)
               </p>
             </div>
           )}
@@ -229,7 +228,7 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
         <Section title=" Historical Learning Engine">
           {learning.length === 0 ? (
             <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-              El motor de aprendizaje registra patrones de detección y ejecución
+              El engine de aprendizaje registra patrones de detection y execution
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -249,12 +248,12 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
                     <div style={{ fontWeight: 900, fontSize: 15, fontFamily: 'var(--font-mono)', color: 'var(--color-green)' }}>
                       {entry.confidenceScore}%
                     </div>
-                    <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>confianza</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>confidence</div>
                   </div>
                 </div>
               ))}
               <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0' }}>
-                Confianza = tamaño muestra (40%) + win rate (40%) + frecuencia detección (20%). Sin IA — heurístico puro.
+                Confidence = sample size (40%) + win rate (40%) + detection frequency (20%). No AI — pure heuristic.
               </p>
             </div>
           )}
@@ -262,10 +261,10 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
       </div>
 
       {/* Fill Probability Section — Always rendered to prevent layout shifts */}
-      <Section title="🎯 Fill Probability Engine — Oportunidad Actual">
+      <Section title="🎯 Fill Probability Engine — Opportunity Actual">
         {!topViable ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13, minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            Buscando oportunidad viable para calcular probabilidad de ejecución...
+            Searching opportunity viable para calculate probabilidad de execution...
           </div>
         ) : (
           <>
@@ -304,7 +303,7 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
                   { label: 'Buy Fill',      val: `${topViable.buyFillPct ?? '—'}%` },
                   { label: 'Sell Fill',     val: `${topViable.sellFillPct ?? '—'}%` },
                   { label: 'Feed',          val: topViable.buySource === 'ws' && topViable.sellSource === 'ws' ? 'WS ×2' : 'Mixed' },
-                  ...(topViable.recommendedSize != null ? [{ label: 'Tamaño Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
+                  ...(topViable.recommendedSize != null ? [{ label: 'Tamyear Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
                 ].map(({ label, val }) => (
                   <div key={label} style={{ display: 'flex', gap: 8 }}>
                     <span style={{ fontSize: 10, color: 'var(--text-dim)', width: 80 }}>{label}:</span>

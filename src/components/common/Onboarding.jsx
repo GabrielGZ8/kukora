@@ -1,8 +1,6 @@
-// ─── Onboarding.jsx v3 — Mapa completo del sistema kukora ──────────────────
-// Cubre: arbitrage bot, análisis cuantitativo, herramientas y módulos de investigación.
-// Tono: directo, técnico, orientado al jurado del hackathon.
+// ─── Onboarding.jsx — System guided tour ──────────────────────────────────────
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const PINK   = '#FF2D78';
@@ -13,233 +11,180 @@ const BLUE   = '#3b82f6';
 const PURPLE = '#8b5cf6';
 
 const STEPS = [
-  // ── 0: ¿Qué es kukora? ──────────────────────────────────────────────────
   {
     id: 'what',
     emoji: '⚡',
-    title: 'Kukora — Bot de arbitraje BTC en tiempo real',
-    subtitle: '5 exchanges · detección < 30ms · ejecución simulada completa',
-    description: 'Kukora monitorea simultáneamente Binance, Kraken, Bybit, OKX y Coinbase vía WebSockets. Cuando detecta que el Ask de un exchange es menor que el Bid de otro, calcula la ganancia neta real (fees + slippage + liquidez) y ejecuta la operación simulada en milisegundos.',
+    title: 'Kukora — Real-time BTC arbitrage engine',
+    subtitle: '5 exchanges · detection < 30ms · full simulated execution',
+    description: 'Kukora simultaneously monitors Binance, Kraken, Bybit, OKX and Coinbase via native WebSockets. When it detects that the ask on one exchange is below the bid on another, it calculates real net profit (fees + slippage + liquidity) and executes the simulated trade in milliseconds.',
     visual: 'arb_diagram',
-    action: 'Ver la arquitectura →',
-    skip: 'Ir al bot directamente',
+    action: 'See the architecture →',
+    skip: 'Go directly to the engine',
     color: PINK,
   },
-
-  // ── 1: Arquitectura técnica ──────────────────────────────────────────────
   {
     id: 'architecture',
     emoji: '🔗',
-    title: 'Arquitectura event-driven de alta frecuencia',
-    subtitle: 'WebSockets → detección → scoring → ejecución → wallet update',
+    title: 'High-frequency event-driven architecture',
+    subtitle: 'WebSockets → detection → scoring → execution → wallet update',
     steps: [
-      { icon: '📡', label: 'WebSocket feeds', desc: 'Binance bookTicker+depth5@100ms · Kraken book v2 · Bybit tickers+orderbook.50 · OKX books5 · Coinbase ticker. Watchdog reconecta automáticamente si un feed se congela >5s.' },
-      { icon: '🔍', label: 'Detección de spread', desc: 'Evalúa los 20 pares posibles entre los 5 exchanges en <1ms. Spread neto = gross – taker fees – slippage VWAP real del L2 – withdrawal fee amortizado.' },
-      { icon: '🛡️', label: 'Circuit breakers', desc: 'Spread < 0.005% → ruido de mercado. Spread > 3% → dato obsoleto. Daily loss > $500 → bot pausado. Liquidez < 50% del volumen → orden parcial.' },
-      { icon: '✅', label: 'Ejecución & wallets', desc: 'Score ≥ 10 + net > $0.05 + fingerprint único (5s TTL) → ejecuta. Wallets se actualizan en ambos exchanges. Equity curve crece en tiempo real.' },
+      { icon: '📡', label: 'WebSocket feeds', desc: 'Binance bookTicker+depth5@100ms · Kraken book v2 · Bybit tickers+orderbook.50 · OKX books5 · Coinbase ticker. Watchdog reconnects automatically if any feed freezes > 5s.' },
+      { icon: '🔍', label: 'Spread detection', desc: 'Evaluates all 20 exchange pairs in under 1ms. Net spread = gross − taker fees − VWAP L2 slippage − amortized withdrawal fee.' },
+      { icon: '🛡️', label: 'Circuit breakers', desc: 'Spread < 0.005% → market noise. Spread > 3% → stale data. Daily loss > $500 → engine paused. Liquidity < 50% of volume → partial fill.' },
+      { icon: '✅', label: 'Execution & wallets', desc: 'Score ≥ 10 + net > $0.05 + unique fingerprint (5s TTL) → executes. Wallets updated on both exchanges. Equity curve updates in real time.' },
     ],
-    action: 'Ver la inteligencia →',
+    action: 'See the intelligence lyesterday →',
     color: INDIGO,
   },
-
-  // ── 2: Inteligencia avanzada ─────────────────────────────────────────────
   {
     id: 'intelligence',
     emoji: '🧠',
-    title: 'Sistema de inteligencia multi-capa',
-    subtitle: 'No solo detecta oportunidades — aprende, predice y prioriza',
+    title: 'Multi-lyesterday intelligence system',
+    subtitle: 'Not just detection — it learns, predicts and prioritizes',
     features: [
-      { icon: '🎯', label: 'Score 0-100',          desc: 'Combina profit%, fill probability, latencia, spread persistence y calidad del feed WS.', color: PINK },
-      { icon: '📊', label: 'Stat Arb (Z-Score)',   desc: 'Detecta desviaciones estadísticas (Z > 2σ) en el diferencial histórico entre pares.', color: INDIGO },
-      { icon: '🔺', label: 'Arbitraje Triangular', desc: 'Señales de 3 legs (A→B→C) con cálculo de netPct > 0.05% antes de auto-ejecución.', color: PURPLE },
-      { icon: '📈', label: 'Exchange Ranking',      desc: 'Aprende qué exchanges tienen mejor latencia y confiabilidad para priorizar los pares.', color: GREEN },
-      { icon: '🔮', label: 'Predictive Ranking',   desc: 'Predice qué pares tendrán mayor spread en los próximos ticks basado en historial.', color: AMBER },
-      { icon: '♻️', label: 'Lifecycle tracking',   desc: 'Ciclo de vida de cada oportunidad: nacimiento, pico de spread, expiración.', color: BLUE },
+      { icon: '🎯', label: 'Score 0–100',          desc: 'Combines profit%, fill probability, latency, spread persistence and WS feed quality.',              color: PINK   },
+      { icon: '📊', label: 'Stat Arb (Z-Score)',   desc: 'Detects statistical deviations (Z > 2σ) in the historical differential between pairs.',              color: INDIGO },
+      { icon: '🔺', label: 'Triangular Arb',       desc: '3-leg intra-exchange routes (A→B→C) with netPct > 0.05% threshold before auto-execution.',          color: PURPLE },
+      { icon: '📈', label: 'Exchange Ranking',      desc: 'Learns which exchanges have better latency and reliability to prioritize pairs.',                    color: GREEN  },
+      { icon: '🔮', label: 'Predictive Ranking',   desc: 'Predicts which pairs will have higher spread in the next ticks based on session history.',           color: AMBER  },
+      { icon: '♻️', label: 'Lifecycle Tracking',   desc: 'Full opportunity lifecycle: birth, spread peak, expiration. Decay curves per pair.',                 color: BLUE   },
     ],
-    action: 'Ver las pantallas →',
+    action: 'See the main screens →',
     color: GREEN,
   },
-
-  // ── 3: Pantallas principales (Core) ──────────────────────────────────────
   {
     id: 'screens_core',
     emoji: '🏆',
-    title: 'Pantallas principales del bot',
-    subtitle: 'Sección "Principal" en el menú lateral',
+    title: 'Core arbitrage screens',
+    subtitle: '"Arbitrage System" section in the sidebar',
     tabs: [
-      {
-        icon: '⚡', label: '/arbitrage — Bot en vivo',
-        desc: 'Executive Dashboard + order books en tiempo real + oportunidades detectadas + historial de trades + curva de equity. La pantalla principal para el jurado.',
-        path: '/arbitrage', color: PINK,
-      },
-      {
-        icon: '📊', label: '/dashboard — Resumen ejecutivo',
-        desc: 'P&L session, win rate, trades ejecutados, exchanges conectados, volatilidad BTC y métricas clave del bot en un solo vistazo.',
-        path: '/dashboard', color: INDIGO,
-      },
-      {
-        icon: '📄', label: '/docs — Documentación técnica',
-        desc: 'Fórmulas exactas de fee, slippage VWAP, break-even, score 0-100, circuit breakers y arquitectura. Para auditar el sistema matemáticamente.',
-        path: '/docs', color: BLUE,
-      },
+      { icon: '⚡', label: '/arbitrage — Live Engine',
+        desc: 'Executive Dashboard + real-time order books + detected opportunities + trade history + equity curve. Primary operational screen.',
+        path: '/arbitrage', color: PINK },
+      { icon: '📊', label: '/dashboard — Executive Summary',
+        desc: 'Session P&L, win rate, executed trades, connected exchanges, BTC volatility and key engine metrics at a glance.',
+        path: '/dashboard', color: INDIGO },
+      { icon: '📄', label: '/docs — Documentation',
+        desc: 'Exact fee formulas, VWAP slippage, break-even, 0–100 scoring, circuit breakers and architecture. For mathematical audit of the system.',
+        path: '/docs', color: BLUE },
     ],
-    action: 'Ver herramientas →',
+    action: 'See operational tools →',
     color: PINK,
   },
-
-  // ── 4: Herramientas ───────────────────────────────────────────────────────
   {
     id: 'screens_tools',
     emoji: '🛠️',
-    title: 'Herramientas de gestión',
-    subtitle: 'Sección "Herramientas" en el menú lateral',
+    title: 'Operational tools',
+    subtitle: '"Tools" section in the sidebar',
     tabs: [
-      {
-        icon: '🔔', label: '/alerts — Sistema de alertas',
-        desc: 'Configura alertas de precio, P&L y spread. Recibe notificaciones en tiempo real vía SSE cuando se disparan las condiciones.',
-        path: '/alerts', color: AMBER,
-      },
-      {
-        icon: '💼', label: '/portfolio — Gestión de portafolio',
-        desc: 'Registra y monitorea posiciones en múltiples activos. Calcula P&L, distribución de capital y rendimiento histórico.',
-        path: '/portfolio', color: GREEN,
-      },
-      {
-        icon: '⭐', label: '/watchlist — Lista de seguimiento',
-        desc: 'Sigue tus activos favoritos con precios en tiempo real, variaciones 24h y alertas personalizadas.',
-        path: '/watchlist', color: BLUE,
-      },
-      {
-        icon: '📈', label: '/markets — Mercados globales',
-        desc: 'Vista de los principales activos cripto: precios, market cap, volumen 24h y variaciones. Datos de CoinGecko.',
-        path: '/markets', color: PURPLE,
-      },
+      { icon: '🔔', label: '/alerts — Alert system',
+        desc: 'Configure price, P&L and spread alerts. Receive real-time notifications via SSE when conditions trigger.',
+        path: '/alerts', color: AMBER },
+      { icon: '💼', label: '/portfolio — Portfolio management',
+        desc: 'Track and monitor positions across multiple assets. Calculates P&L, capital distribution and historical performance.',
+        path: '/portfolio', color: GREEN },
+      { icon: '⭐', label: '/watchlist — Watchlist',
+        desc: 'Follow your assets with real-time prices, 24h changes and custom alerts.',
+        path: '/watchlist', color: BLUE },
+      { icon: '📈', label: '/markets — Global markets',
+        desc: 'Top crypto assets: prices, market cap, 24h volume and changes. Data via CoinGecko API.',
+        path: '/markets', color: PURPLE },
     ],
-    action: 'Ver análisis cuantitativo →',
+    action: 'See quantitative analysis →',
     color: AMBER,
   },
-
-  // ── 5: Análisis cuantitativo ─────────────────────────────────────────────
   {
     id: 'screens_advanced',
     emoji: '📐',
-    title: 'Análisis Cuantitativo',
-    subtitle: 'Sección colapsable "Análisis Cuantitativo" en el menú — click para expandir',
+    title: 'Quantitative Analysis',
+    subtitle: 'Collapsible "Quantitative Analysis" section in the sidebar',
     tabs: [
-      {
-        icon: '📂', label: '/analyze — Dataset Analyzer',
-        desc: 'Sube cualquier CSV de precios y ejecuta el stack cuantitativo completo: retornos, VaR, Sharpe, drawdown, correlaciones.',
-        path: '/analyze', color: PINK,
-      },
-      {
-        icon: '⚖️', label: '/compare — Comparar Activos',
-        desc: 'Compara hasta 4 activos: retornos normalizados, ratio de Sharpe, máximo drawdown, beta y correlación entre ellos.',
-        path: '/compare', color: INDIGO,
-      },
-      {
-        icon: '⚠️', label: '/risk — Risk Engine',
-        desc: 'VaR histórico, Conditional VaR (CVaR), Beta vs BTC, Sharpe y Sortino. Métricas de riesgo institucionales.',
-        path: '/risk', color: AMBER,
-      },
-      {
-        icon: '🧬', label: '/intelligence — Intelligence Panel',
-        desc: 'Rankings de exchanges, volatilidad de mercado, lifecycle de oportunidades y predicciones. Feed de inteligencia del bot.',
-        path: '/intelligence', color: GREEN,
-      },
-      {
-        icon: '📊', label: '/analytics — Price Analytics',
-        desc: 'Gráficos de precio histórico, max/min/avg por periodo, volumen y distribución de retornos por activo.',
-        path: '/analytics', color: BLUE,
-      },
-      {
-        icon: '🌡️', label: '/heatmap — Heatmap de Rendimientos',
-        desc: 'Mapa de calor de rendimientos por activo y periodo de tiempo. Identifica patrones estacionales y activos calientes.',
-        path: '/heatmap', color: PURPLE,
-      },
+      { icon: '📂', label: '/analyze — Dataset Analyzer',
+        desc: 'Upload any price CSV and run the full quant stack: returns, VaR, Sharpe, drawdown, correlations.',
+        path: '/analyze', color: PINK },
+      { icon: '⚖️', label: '/compare — Asset Compare',
+        desc: 'Compare up to 4 assets: normalized returns, Sharpe ratio, maximum drawdown, beta and cross-correlation.',
+        path: '/compare', color: INDIGO },
+      { icon: '⚠️', label: '/risk — Risk Engine',
+        desc: 'Historical VaR, Conditional VaR (CVaR), Beta vs BTC, Sharpe and Sortino. Institutional risk metrics.',
+        path: '/risk', color: AMBER },
+      { icon: '🧬', label: '/intelligence — Intelligence Panel',
+        desc: 'Exchange rankings, market volatility, opportunity lifecycle and predictions. Engine intelligence feed.',
+        path: '/intelligence', color: GREEN },
+      { icon: '📊', label: '/analytics — Price Analytics',
+        desc: 'Historical price charts, max/min/avg by period, volume and return distribution per asset.',
+        path: '/analytics', color: BLUE },
+      { icon: '🌡️', label: '/heatmap — Performance Heatmap',
+        desc: 'Return heatmap by asset and time period. Identify seasonal patterns and trending assets.',
+        path: '/heatmap', color: PURPLE },
     ],
-    action: 'Ver módulos de investigación →',
+    action: 'See research modules →',
     color: INDIGO,
   },
-
-  // ── 6: Investigación cuantitativa ────────────────────────────────────────
   {
     id: 'screens_research',
     emoji: '🔬',
-    title: 'Módulos de Investigación',
-    subtitle: 'Sub-sección "🔬 Investigación" dentro de Análisis Cuantitativo',
+    title: 'Research Modules',
+    subtitle: '"🔬 Research" sub-section within Quantitative Analysis',
     tabs: [
-      {
-        icon: '📉', label: '/analytics-ta — Análisis Técnico',
-        desc: 'RSI, MACD, Bollinger Bands con gráficos de velas TradingView (lightweight-charts). Señales técnicas automáticas.',
-        path: '/analytics-ta', color: PINK,
-      },
-      {
-        icon: '🔭', label: '/forecast — Forecast de Precio',
-        desc: 'Proyecciones de precio usando regresión + GBM con intervalos de confianza del 80% y 95%. Horizonte 7/30/90 días.',
-        path: '/forecast', color: INDIGO,
-      },
-      {
-        icon: '🌀', label: '/regime — Market Regime',
-        desc: 'Detección de régimen de mercado: tendencia alcista, tendencia bajista o rango lateral. Usa volatilidad y momentum.',
-        path: '/regime', color: AMBER, badge: 'AI',
-      },
-      {
-        icon: '🌐', label: '/galaxy — Correlation Galaxy',
-        desc: 'Red animada de correlaciones entre activos cripto. Nodos se acercan cuando los activos están correlacionados.',
-        path: '/galaxy', color: BLUE, badge: 'LIVE',
-      },
-      {
-        icon: '🎲', label: '/montecarlo — Monte Carlo',
-        desc: 'Simulación GBM con 500+ trayectorias de precio. Calcula distribución de escenarios y probabilidades de retorno.',
-        path: '/montecarlo', color: GREEN,
-      },
-      {
-        icon: '⏮️', label: '/backtest — Backtesting',
-        desc: 'Prueba estrategias de trading sobre datos históricos. Calcula P&L, drawdown, win rate y métricas de rendimiento.',
-        path: '/backtest', color: PURPLE,
-      },
+      { icon: '📉', label: '/analytics-ta — Technical Analysis',
+        desc: 'RSI, MACD, Bollinger Bands with candlestick charts (lightweight-charts). Automatic technical signals.',
+        path: '/analytics-ta', color: PINK },
+      { icon: '🔭', label: '/forecast — Price Forecast',
+        desc: 'Price projections using regression + GBM with 80% and 95% confidence intervals. 7/30/90-day horizon.',
+        path: '/forecast', color: INDIGO },
+      { icon: '🌀', label: '/regime — Market Regime',
+        desc: 'Market regime detection: uptrend, downtrend or sideways range. Uses volatility and momentum signals.',
+        path: '/regime', color: AMBER, badge: 'AI' },
+      { icon: '🌐', label: '/galaxy — Correlation Galaxy',
+        desc: 'Animated correlation network across crypto assets. Nodes move closer when assets are correlated.',
+        path: '/galaxy', color: BLUE, badge: 'LIVE' },
+      { icon: '🎲', label: '/montecarlo — Monte Carlo',
+        desc: 'GBM simulation with 500+ price trajectories. Computes scenario distribution and return probabilities.',
+        path: '/montecarlo', color: GREEN },
+      { icon: '⏮️', label: '/backtest — Strategy Backtest',
+        desc: 'Test trading strategies on historical data. Computes P&L, drawdown, win rate and performance metrics.',
+        path: '/backtest', color: PURPLE },
     ],
-    action: '¡Explorar el bot! →',
+    action: 'Open the engine →',
     color: PURPLE,
   },
 ];
 
-// ─── ArbDiagram ─────────────────────────────────────────────────────────────
 function ArbDiagram() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '16px 0', flexWrap: 'wrap' }}>
       <div style={{ background: 'rgba(240,185,11,0.08)', border: '1px solid rgba(240,185,11,0.3)', borderRadius: 12, padding: '14px 18px', textAlign: 'center', minWidth: 120 }}>
         <div style={{ fontSize: 10, color: '#F0B90B', fontWeight: 800, marginBottom: 6, letterSpacing: '0.08em' }}>BINANCE</div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>$70,000</div>
-        <div style={{ marginTop: 8, background: '#F0B90B', color: '#000', fontWeight: 800, fontSize: 10, padding: '3px 10px', borderRadius: 99 }}>COMPRAR ↑</div>
+        <div style={{ marginTop: 8, background: '#F0B90B', color: '#000', fontWeight: 800, fontSize: 10, padding: '3px 10px', borderRadius: 99 }}>BUY ↑</div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>fee: $70.00</div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 12px' }}>
-        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 2, fontWeight: 700 }}>SPREAD BRUTO</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginBottom: 2, fontWeight: 700 }}>GROSS SPREAD</div>
         <div style={{ fontSize: 18, color: PINK, fontWeight: 900, fontFamily: 'var(--font-mono)' }}>+$250</div>
         <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 1 }}>− fees $140.25</div>
         <div style={{ width: 40, height: 2, background: `linear-gradient(90deg,#F0B90B,${PINK})`, margin: '6px 0', borderRadius: 2 }} />
         <div style={{ fontSize: 14, color: GREEN, fontWeight: 900, fontFamily: 'var(--font-mono)' }}>= +$109.75</div>
-        <div style={{ fontSize: 9, color: GREEN, marginTop: 1 }}>ganancia neta</div>
+        <div style={{ fontSize: 9, color: GREEN, marginTop: 1 }}>net profit</div>
       </div>
 
       <div style={{ background: 'rgba(87,65,217,0.08)', border: '1px solid rgba(87,65,217,0.3)', borderRadius: 12, padding: '14px 18px', textAlign: 'center', minWidth: 120 }}>
         <div style={{ fontSize: 10, color: INDIGO, fontWeight: 800, marginBottom: 6, letterSpacing: '0.08em' }}>KRAKEN</div>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>$70,250</div>
-        <div style={{ marginTop: 8, background: INDIGO, color: '#fff', fontWeight: 800, fontSize: 10, padding: '3px 10px', borderRadius: 99 }}>VENDER ↓</div>
+        <div style={{ marginTop: 8, background: INDIGO, color: '#fff', fontWeight: 800, fontSize: 10, padding: '3px 10px', borderRadius: 99 }}>SELL ↓</div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>fee: $70.25</div>
       </div>
     </div>
   );
 }
 
-// ─── StepDots ────────────────────────────────────────────────────────────────
 function StepDots({ total, current, onGoTo }) {
   return (
     <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
       {Array.from({ length: total }).map((_, i) => (
-        <button key={i} onClick={() => onGoTo(i)} title={`Paso ${i+1}`} style={{
+        <button key={i} onClick={() => onGoTo(i)} title={`Step ${i+1}`} style={{
           width: i === current ? 18 : 7, height: 7, borderRadius: 99, border: 'none', cursor: 'pointer',
           background: i === current ? STEPS[current].color : 'var(--border)',
           transition: 'all 0.25s', padding: 0, flexShrink: 0,
@@ -249,7 +194,6 @@ function StepDots({ total, current, onGoTo }) {
   );
 }
 
-// ─── NavPill ─────────────────────────────────────────────────────────────────
 function NavPill({ path, color }) {
   const navigate = useNavigate();
   return (
@@ -269,12 +213,17 @@ function NavPill({ path, color }) {
   );
 }
 
-// ─── Main export ─────────────────────────────────────────────────────────────
 export default function Onboarding({ show, step, setStep, onDismiss }) {
   const navigate    = useNavigate();
   const overlayRef  = useRef(null);
   const [animating, setAnimating] = useState(false);
   const s = STEPS[step] || STEPS[0];
+
+  const goNext = useCallback(() => {
+    if (step >= STEPS.length - 1) { onDismiss(); navigate('/arbitrage'); return; }
+    setAnimating(true);
+    setTimeout(() => { setStep(step + 1); setAnimating(false); }, 110);
+  }, [step, onDismiss, navigate, setStep]);
 
   useEffect(() => {
     if (!show) return;
@@ -285,13 +234,8 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [show, step]);
+  }, [show, step, goNext, onDismiss, setStep]);
 
-  const goNext = () => {
-    if (step >= STEPS.length - 1) { onDismiss(); navigate('/arbitrage'); return; }
-    setAnimating(true);
-    setTimeout(() => { setStep(step + 1); setAnimating(false); }, 110);
-  };
   const dismiss = () => { onDismiss(); navigate('/arbitrage'); };
 
   if (!show) return null;
@@ -316,10 +260,8 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
         transition: 'opacity 0.11s, transform 0.11s',
       }}>
 
-        {/* Color bar */}
         <div style={{ height: 4, background: `linear-gradient(90deg, ${s.color}, ${s.color}88)`, flexShrink: 0 }} />
 
-        {/* Header */}
         <div style={{ padding: '22px 28px 0', display: 'flex', alignItems: 'flex-start', gap: 14, flexShrink: 0 }}>
           <div style={{
             width: 46, height: 46, borderRadius: 12, flexShrink: 0,
@@ -332,20 +274,17 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
           <button onClick={dismiss} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 4, flexShrink: 0 }}>×</button>
         </div>
 
-        {/* Body — scrollable */}
         <div style={{ padding: '18px 28px', flex: 1, overflowY: 'auto' }}>
 
-          {/* 0: what */}
           {s.id === 'what' && (<>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.65, margin: '0 0 14px' }}>{s.description}</p>
             <ArbDiagram />
             <div style={{ background: 'rgba(0,184,122,0.06)', border: '1px solid rgba(0,184,122,0.2)', borderRadius: 10, padding: '10px 14px', marginTop: 6 }}>
-              <div style={{ fontSize: 11, color: GREEN, fontWeight: 800, marginBottom: 3 }}>⚡ Modelo Pre-funded Bilateral</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>Wallets fondadas en los 5 exchanges desde el inicio. Cada trade ejecuta compra y venta simultáneamente — sin transferencias entre exchanges, sin delay de liquidación.</div>
+              <div style={{ fontSize: 11, color: GREEN, fontWeight: 800, marginBottom: 3 }}>⚡ Pre-funded Bilateral Model</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>Wallets funded across all 5 exchanges from the start. Each trade executes buy and sell simultaneously — no inter-exchange transfers, no settlement delay.</div>
             </div>
           </>)}
 
-          {/* 1: architecture */}
           {s.id === 'architecture' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {s.steps.map((st, i) => (
@@ -360,13 +299,12 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
               <div style={{ marginTop: 6, background: `${INDIGO}09`, border: `1px solid ${INDIGO}25`, borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
                 <span style={{ fontSize: 16 }}>🎯</span>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  <strong style={{ color: INDIGO }}>Break-even real:</strong> 0.05 BTC a $100k → notional $5,000 → fees ≈$10 → slippage ≈$5 → se necesita spread &gt; 0.03% para ser rentable neto.
+                  <strong style={{ color: INDIGO }}>Real break-even:</strong> 0.05 BTC at $100k → notional $5,000 → fees ≈$10 → slippage ≈$5 → requires spread &gt; 0.03% for positive net.
                 </div>
               </div>
             </div>
           )}
 
-          {/* 2: intelligence */}
           {s.id === 'intelligence' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {s.features.map((f, i) => (
@@ -379,7 +317,6 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
             </div>
           )}
 
-          {/* 3, 4, 5, 6: pantallas con tabs */}
           {['screens_core','screens_tools','screens_advanced','screens_research'].includes(s.id) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {s.tabs.map((t, i) => (
@@ -405,7 +342,6 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
           )}
         </div>
 
-        {/* Footer */}
         <div style={{ padding: '0 28px 20px', flexShrink: 0 }}>
           <StepDots total={STEPS.length} current={step} onGoTo={setStep} />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
@@ -415,7 +351,7 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
                 color: 'var(--text-muted)', borderRadius: 10, padding: '9px 18px',
                 fontWeight: 700, fontSize: 12, cursor: 'pointer',
               }}>
-                ← Atrás
+                ← Back
               </button>
             )}
             <button onClick={goNext} style={{
@@ -424,7 +360,7 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
               fontWeight: 800, fontSize: 13, cursor: 'pointer',
               boxShadow: `0 4px 14px ${s.color}44`,
             }}>
-              {s.id === 'screens_research' ? '¡Explorar el bot! →' : s.action}
+              {s.id === 'screens_research' ? 'Open the engine →' : s.action}
             </button>
           </div>
           {step === 0 && (
@@ -438,13 +374,13 @@ export default function Onboarding({ show, step, setStep, onDismiss }) {
             </button>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-dim)', marginTop: 10 }}>
-            <span>Paso {step + 1} de {STEPS.length}</span>
+            <span>Step {step + 1} of {STEPS.length}</span>
             <span>
               <kbd style={{ background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 4px', fontSize: 9 }}>←</kbd>
               {' '}<kbd style={{ background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 4px', fontSize: 9 }}>→</kbd>
-              {' '}navegar · {' '}
+              {' '}navigate · {' '}
               <kbd style={{ background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 4px', fontSize: 9 }}>Esc</kbd>
-              {' '}cerrar
+              {' '}close
             </span>
           </div>
         </div>

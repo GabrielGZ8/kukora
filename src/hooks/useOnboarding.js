@@ -1,5 +1,5 @@
 // ─── useOnboarding.js ─────────────────────────────────────────────────────
-// Persiste el estado del onboarding en localStorage
+// Persiste el status del onboarding en localStorage
 // Exporta: show, dismiss, reset, step, setStep
 
 import { useState, useCallback, useEffect } from 'react';
@@ -15,21 +15,21 @@ export function useOnboarding() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (!saved) {
-        // Primera vez: mostrar después de 800ms (deja que cargue la app)
+        // First visit: delay 800ms to let the app finish loading
         const t = setTimeout(() => setShow(true), 800);
         return () => clearTimeout(t);
       }
-    } catch {}
+    } catch { /* localStorage unavailable in private browsing — skip persistence */ }
   }, []);
 
   const dismiss = useCallback(() => {
     setShow(false);
     setStep(0);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ completed: true, date: Date.now() })); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ completed: true, date: Date.now() })); } catch { /* private browsing */ }
   }, []);
 
   const reset = useCallback(() => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* private browsing */ }
     setStep(0);
     setShow(true);
   }, []);

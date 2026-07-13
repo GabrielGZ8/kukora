@@ -67,7 +67,7 @@ export function CoinTable({ coins, onSelect, compact = false }) {
   if (!coins?.length) return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 48, flexDirection: 'column', gap: 10 }}>
       <div className="spinner" />
-      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Cargando mercados…</span>
+      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Loading markets…</span>
     </div>
   );
 
@@ -78,7 +78,7 @@ export function CoinTable({ coins, onSelect, compact = false }) {
   };
 
   const sorted = [...coins].sort((a, b) => {
-    let av = a[sortField], bv = b[sortField];
+    const av = a[sortField], bv = b[sortField];
     if (av == null) return 1;
     if (bv == null) return -1;
     return sortDir === 'asc' ? av - bv : bv - av;
@@ -91,19 +91,18 @@ export function CoinTable({ coins, onSelect, compact = false }) {
           <tr>
             <TH field="market_cap_rank" sortField={sortField} sortDir={sortDir} onSort={handleSort}>#</TH>
             <TH>Asset</TH>
-            <TH right field="current_price" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Precio</TH>
+            <TH right field="current_price" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Price</TH>
             {!compact && <TH right field="price_change_percentage_1h_in_currency" sortField={sortField} sortDir={sortDir} onSort={handleSort}>1h</TH>}
             <TH right field="price_change_percentage_24h" sortField={sortField} sortDir={sortDir} onSort={handleSort}>24h</TH>
             {!compact && <TH right field="price_change_percentage_7d_in_currency" sortField={sortField} sortDir={sortDir} onSort={handleSort}>7d</TH>}
             <TH right field="market_cap" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Mkt Cap</TH>
-            {!compact && <TH right field="total_volume" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Volumen</TH>}
+            {!compact && <TH right field="total_volume" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Volume</TH>}
             {!compact && <TH right>Volat.</TH>}
             <TH right>7d</TH>
           </tr>
         </thead>
         <tbody>
-          {sorted.map((c, idx) => {
-            const up24 = (c.price_change_percentage_24h || 0) >= 0;
+          {sorted.map((c) => {
             return (
               <tr
                 key={c.id}

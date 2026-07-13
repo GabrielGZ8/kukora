@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
-import { ErrorState, EmptyState } from '../components/common/StateViews';
+
 
 const COINS = [
   { id: 'bitcoin',     label: 'BTC', color: '#F7931A' },
@@ -94,7 +94,7 @@ export default function ForecastPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>◌ Forecast</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Proyección estadística de precio · Ensemble (SMA Drift + Holt EWM) · Intervalos de confianza 90%</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Proyección statistic de price · Ensemble (SMA Drift + Holt EWM) · Intervals de confidence 90%</p>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {PERIODS.map(p => (
@@ -126,7 +126,7 @@ export default function ForecastPage() {
           <div style={{ padding: '14px 20px 12px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <span style={{ fontSize: 14, fontWeight: 800 }}>{coin.label}/USD</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>Historial {period.label} + forecast {horizon.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>History {period.label} + forecast {horizon.label}</span>
             </div>
             <div style={{ display: 'flex', gap: 16, fontSize: 11 }}>
               <span><span style={{ color: coin.color, fontWeight: 700 }}>—</span> Histórico</span>
@@ -144,7 +144,7 @@ export default function ForecastPage() {
           <div className="card">
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Proyección {horizon.label}</div>
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Precio actual</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Price actual</div>
               <div style={{ fontSize: 18, fontWeight: 900 }}>{fmt(lastPrice)}</div>
             </div>
             {targetH && (
@@ -172,7 +172,7 @@ export default function ForecastPage() {
 
           {/* Day-by-day table */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>Proyección día a día</div>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>Proyección day a day</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface-2)' }}>
@@ -196,12 +196,12 @@ export default function ForecastPage() {
           {/* Backtest accuracy */}
           {bt && (
             <div className="card">
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Backtest (modelo)</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Backtest (model)</div>
               {[
-                { label: 'MAPE',      value: `${bt.mape?.toFixed(2)}%`, note: 'error promedio', good: bt.mape < 5 },
+                { label: 'MAPE',      value: `${bt.mape?.toFixed(2)}%`, note: 'error average', good: bt.mape < 5 },
                 { label: 'Hit Rate',  value: `${bt.hitRate?.toFixed(1)}%`, note: 'dentro del CI', good: bt.hitRate > 70 },
-                { label: 'Horizonte', value: `${bt.horizon}d`, note: 'testado', good: true },
-                { label: 'Modelo',    value: bt.model, note: '', good: true },
+                { label: 'Horizonte', value: `${bt.horizon}d`, note: 'tstatus', good: true },
+                { label: 'Model',    value: bt.model, note: '', good: true },
               ].map(r => (
                 <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <div>
@@ -212,7 +212,7 @@ export default function ForecastPage() {
                 </div>
               ))}
               <div style={{ marginTop: 10, fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                ⚠ Proyección estadística. No es asesoría financiera.
+                ⚠ Proyección statistic. No es asesoría financiera.
               </div>
             </div>
           )}

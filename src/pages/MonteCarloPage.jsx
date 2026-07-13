@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { api } from '../api';
 import { PageHeader } from '../components/common/PageHeader';
-import { HelpBadge } from '../components/common/TooltipHint';
 
 const COINS = [
   { id: 'bitcoin',     label: 'BTC ·  Bitcoin' },
@@ -208,7 +207,7 @@ export default function MonteCarloPage() {
       if (target) p.set('target', target);
       const r = await api.get(`/api/crypto/coin/${coin}/montecarlo?${p}`);
       setData(r);
-    } catch (e) { setError(e.message || 'Error al ejecutar la simulación'); }
+    } catch (e) { setError(e.message || 'Error al execute la simulation'); }
     finally { setLoading(false); }
   }, [coin, horizon, sims, target]);
 
@@ -224,7 +223,7 @@ export default function MonteCarloPage() {
       <PageHeader
         title="Monte Carlo Simulation"
         description="Geometric Brownian Motion · abanico probabilístico animado · percentiles P5/P50/P95"
-        help="Simula miles de trayectorias de precio usando el modelo GBM (dS = μS·dt + σS·dW). Los parámetros μ y σ se calibran con datos históricos reales."
+        help="Simulates thousands of price trajectories using the GBM model (dS = μS·dt + σS·dW). Parameters μ and σ are calibrated from real historical data."
       />
 
       {/* Controls */}
@@ -232,7 +231,7 @@ export default function MonteCarloPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
           {[
             {
-              label: 'Activo',
+              label: 'Asset',
               el: (
                 <select style={selectStyle} value={coin} onChange={e => setCoin(e.target.value)}>
                   {COINS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -243,7 +242,7 @@ export default function MonteCarloPage() {
               label: 'Horizonte',
               el: (
                 <select style={selectStyle} value={horizon} onChange={e => setHorizon(Number(e.target.value))}>
-                  {[7, 14, 30, 60, 90].map(d => <option key={d} value={d}>{d} días</option>)}
+                  {[7, 14, 30, 60, 90].map(d => <option key={d} value={d}>{d} days</option>)}
                 </select>
               ),
             },
@@ -256,7 +255,7 @@ export default function MonteCarloPage() {
               ),
             },
             {
-              label: 'Precio objetivo ($)',
+              label: 'Price objetivo ($)',
               el: (
                 <input
                   className="input"
@@ -275,7 +274,7 @@ export default function MonteCarloPage() {
             </div>
           ))}
           <button className="btn btn-primary" onClick={run} disabled={loading} style={{ alignSelf: 'flex-end' }}>
-            {loading ? '⟳ Simulando…' : '▶ Ejecutar GBM'}
+            {loading ? '⟳ Running…' : '▶ Run GBM'}
           </button>
         </div>
       </div>
@@ -289,7 +288,7 @@ export default function MonteCarloPage() {
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
           <div className="spinner" style={{ margin: '0 auto 14px' }} />
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>Generando {sims} trayectorias GBM…</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>Generando {sims} trajectorys GBM…</div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>dS = μS·dt + σS·dW</div>
         </div>
       )}
@@ -299,13 +298,13 @@ export default function MonteCarloPage() {
           {/* KPI row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 18 }}>
             {[
-              { label: 'Precio Actual',    value: fmt(data.S0),                                    accent: '#0f1117' },
-              { label: 'Precio Esperado',  value: fmt(data.mean),                                   accent: 'var(--color-blue)' },
-              { label: 'Retorno EV',       value: fmtPct(data.expectedReturn), accent: (data.expectedReturn || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
-              { label: 'P10 Bajista',      value: fmt(data.percentiles?.p10 || data.percentiles?.p5), accent: 'var(--color-red)' },
+              { label: 'Price Actual',    value: fmt(data.S0),                                    accent: '#0f1117' },
+              { label: 'Price Esperado',  value: fmt(data.mean),                                   accent: 'var(--color-blue)' },
+              { label: 'Return EV',       value: fmtPct(data.expectedReturn), accent: (data.expectedReturn || 0) >= 0 ? 'var(--color-green)' : 'var(--color-red)' },
+              { label: 'P10 Bearish',      value: fmt(data.percentiles?.p10 || data.percentiles?.p5), accent: 'var(--color-red)' },
               { label: 'P50 Mediana',      value: fmt(data.percentiles?.p50),                       accent: 'var(--color-blue)' },
-              { label: 'P90 Alcista',      value: fmt(data.percentiles?.p90 || data.percentiles?.p95), accent: 'var(--color-green)' },
-              { label: 'Volatilidad σ',    value: `${data.sigma?.toFixed(2)}%/d`,                   accent: 'var(--color-yellow)' },
+              { label: 'P90 Bullish',      value: fmt(data.percentiles?.p90 || data.percentiles?.p95), accent: 'var(--color-green)' },
+              { label: 'Volatility σ',    value: `${data.sigma?.toFixed(2)}%/d`,                   accent: 'var(--color-yellow)' },
               { label: 'Drift μ',          value: `${data.mu?.toFixed(3)}%/d`,                      accent: 'var(--color-purple)' },
             ].map(({ label, value, accent }) => (
               <div key={label} style={{ background: '#fff', borderRadius: 'var(--radius)', padding: '12px 14px', border: '1px solid var(--border)', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -317,8 +316,8 @@ export default function MonteCarloPage() {
 
           {/* Export buttons */}
           <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-            <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON({percentiles:data.percentiles,expectedReturn:data.expectedReturn,sigma:data.sigma,mu:data.mu},'kukora_montecarlo.json')}>↓ Resultados JSON</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>exportCSV(data.histogram,'kukora_distribution.csv')}>↓ Distribución CSV</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON({percentiles:data.percentiles,expectedReturn:data.expectedReturn,sigma:data.sigma,mu:data.mu},'kukora_montecarlo.json')}>↓ Results JSON</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>exportCSV(data.histogram,'kukora_distribution.csv')}>↓ Distribution CSV</button>
           </div>
 
           {/* Target probability */}
@@ -329,11 +328,11 @@ export default function MonteCarloPage() {
               </div>
               <div style={{ display: 'flex', gap: 32 }}>
                 <div>
-                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>P(precio &gt; objetivo)</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>P(price &gt; objetivo)</div>
                   <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--color-green)', fontFamily: 'var(--font-mono)' }}>{data.probAbove}%</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>P(precio &lt; objetivo)</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>P(price &lt; objetivo)</div>
                   <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--color-red)', fontFamily: 'var(--font-mono)' }}>{data.probBelow}%</div>
                 </div>
               </div>
@@ -344,16 +343,16 @@ export default function MonteCarloPage() {
           <div className="card" style={{ marginBottom: 18, padding: '18px 20px' }}>
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Abanico Probabilístico</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{data.paths?.length} trayectorias GBM · horizonte {data.horizon}d · verde = alcistas · rojo = bajistas</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{data.paths?.length} trajectorys GBM · horizonte {data.horizon}d · verde = bullishs · rojo = bearishs</div>
             </div>
             <MonteCarloCanvas data={data} />
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 12 }}>
               {[
-                { color: '#f03e3e', label: 'P5 (bajista extremo)', dash: true },
+                { color: '#f03e3e', label: 'P5 (bearish extremo)', dash: true },
                 { color: '#f59e0b', label: 'P25' },
                 { color: '#3b82f6', label: 'P50 (mediana)', bold: true },
                 { color: '#8b5cf6', label: 'P75' },
-                { color: '#00b87a', label: 'P95 (alcista extremo)', dash: true },
+                { color: '#00b87a', label: 'P95 (bullish extremo)', dash: true },
               ].map(({ color, label, dash, bold }) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
                   <div style={{ width: 20, height: bold ? 2.5 : 1.5, background: color, borderRadius: 1, opacity: dash ? 0.7 : 1 }} />
@@ -365,9 +364,9 @@ export default function MonteCarloPage() {
 
           {/* Histogram */}
           <div className="card" style={{ padding: '18px 20px' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Distribución Final de Precios</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Distribution Final de Prices</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
-              Frecuencia al día {data.horizon} · {data.paths?.length} simulaciones
+              Frequency al day {data.horizon} · {data.paths?.length} simulaciones
             </div>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={data.histogram} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -380,7 +379,7 @@ export default function MonteCarloPage() {
                 <YAxis tick={{ fontSize: 9, fill: 'var(--text-dim)' }} />
                 <Tooltip
                   contentStyle={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
-                  formatter={v => [`${v} simulaciones`, 'Frecuencia']}
+                  formatter={v => [`${v} simulaciones`, 'Frequency']}
                 />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                   {data.histogram?.map((entry, i) => (
@@ -396,7 +395,7 @@ export default function MonteCarloPage() {
       {!data && !loading && !error && (
         <div style={{ textAlign: 'center', padding: 80, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.2 }}>⟳</div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Configura y ejecuta la simulación</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Configura y ejecuta la simulation</div>
           <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-dim)' }}>Geometric Brownian Motion · dS = μS·dt + σS·dW</div>
         </div>
       )}

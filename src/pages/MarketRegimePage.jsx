@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
 import { PageHeader } from '../components/common/PageHeader';
-import { HelpBadge } from '../components/common/TooltipHint';
 
 const COINS_DEFAULT = 'bitcoin,ethereum,solana,binancecoin,ripple';
 
@@ -29,13 +28,14 @@ function ConfidenceBar({ value, color }) {
 }
 
 function KCSGauge({ kcs }) {
-  if (!kcs) return null;
-  const score = kcs.score || 50;
-  const color = kcs.color || '#f59e0b';
+  const score = kcs?.score || 50;
+  const color = kcs?.color || '#f59e0b';
   const r = 58, cx = 74, cy = 74;
   const circ = 2 * Math.PI * r;
   const [dash, setDash] = useState(0);
   useEffect(() => { const t = setTimeout(() => setDash(circ * (score / 100)), 200); return () => clearTimeout(t); }, [score, circ]);
+
+  if (!kcs) return null;
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -99,8 +99,8 @@ function KCSBreakdown({ components }) {
 }
 
 function SignalPill({ signal }) {
-  const pos = ['Alcista', 'Positivo', 'Normal', 'Fuerte subida'];
-  const neg = ['Bajista', 'Negativo', 'Riesgo', 'Fuerte caída'];
+  const pos = ['Bullish', 'Positivo', 'Normal', 'Fuerte subida'];
+  const neg = ['Bearish', 'Negative', 'Risk', 'Strong drop', 'Compressed (caution)'];
   const isPos = pos.some(w => signal.interpretation.includes(w));
   const isNeg = neg.some(w => signal.interpretation.includes(w));
   const color = isPos ? 'var(--color-green)' : isNeg ? 'var(--color-red)' : 'var(--color-yellow)';
@@ -135,7 +135,7 @@ function AssetRow({ asset }) {
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: meta.color, fontFamily: 'var(--font-mono)' }}>{asset.regime?.confidence}%</div>
-        <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>confianza</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>confidence</div>
       </div>
     </div>
   );
@@ -163,17 +163,17 @@ export default function MarketRegimePage() {
     <div className="page-enter">
       <PageHeader
         title="Market Regime Engine"
-        description="Detección cuantitativa del régimen de mercado actual · análisis multi-señal en tiempo real"
+        description="Detection cuantitativa del regime de market actual · analysis multi-signal in real time"
         badge="AI"
         live
-        actions={data && <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON(data,'kukora_regime.json')}>↓ Exportar JSON</button>}
-        help="Clasifica el mercado en 6 regímenes usando volatilidad normalizada, tendencia MA y momentum. Se actualiza cada 2 minutos."
+        actions={data && <button className="btn btn-ghost btn-sm" onClick={()=>exportJSON(data,'kukora_regime.json')}>↓ Export JSON</button>}
+        help="Clasifica el market en 6 regímenes usando volatility normalizada, trend MA y momentum. Se actualiza cada 2 minutes."
       />
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
           <div className="spinner" style={{ margin: '0 auto 14px' }} />
-          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Analizando régimen de mercado…</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Analizando regime de market…</div>
         </div>
       )}
 
@@ -196,7 +196,7 @@ export default function MarketRegimePage() {
                 Kukora AI · Market Regime Detected
               </span>
               <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-dim)' }}>
-                {assets.length} activos analizados · 30d
+                {assets.length} actives analizados · 30d
               </span>
             </div>
 
@@ -213,14 +213,14 @@ export default function MarketRegimePage() {
                     {meta.icon}
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>RÉGIMEN ACTIVO</div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>ACTIVE REGIME</div>
                     <div style={{ fontSize: 22, fontWeight: 900, color: meta.color, lineHeight: 1.1 }}>{consensus.label}</div>
                   </div>
                 </div>
 
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Confianza del modelo</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Confidence del model</span>
                     <span style={{ fontSize: 12, fontWeight: 800, color: meta.color, fontFamily: 'var(--font-mono)' }}>{consensus.confidence}%</span>
                   </div>
                   <ConfidenceBar value={consensus.confidence} color={meta.color} />
@@ -233,11 +233,11 @@ export default function MarketRegimePage() {
                 {firstAsset?.breakoutProbability && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, padding: '12px 14px', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
                     <div>
-                      <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Prob. Ruptura 7d</div>
+                      <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Prob. Breakout 7d</div>
                       <div style={{ fontSize: 28, fontWeight: 900, color: meta.color, fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{firstAsset.breakoutProbability}%</div>
                     </div>
                     <div style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                      Probabilidad histórica de movimiento expansivo en los próximos 7 días
+                      Probabilidad histórica de movimiento expansivo en los nexts 7 days
                     </div>
                   </div>
                 )}
@@ -246,7 +246,7 @@ export default function MarketRegimePage() {
               {/* Right: Signals */}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
-                  Señales del Sistema
+                  Signales del System
                 </div>
                 {(firstAsset?.signals || []).map((s, i) => (
                   <SignalPill key={i} signal={s} />
@@ -279,9 +279,9 @@ export default function MarketRegimePage() {
             {/* Per-asset regimes */}
             <div className="card">
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                Régimen por Activo
+                Regime por Asset
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14 }}>Análisis individual · 30 días</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14 }}>Analysis individual · 30 days</div>
               {assets.map(a => <AssetRow key={a.id} asset={a} />)}
             </div>
           </div>
@@ -291,7 +291,7 @@ export default function MarketRegimePage() {
       {!loading && !consensus && (
         <div style={{ textAlign: 'center', padding: 80, color: 'var(--text-muted)' }}>
           <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.3 }}>◈</div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Sin datos disponibles</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>No data availables</div>
           <div style={{ fontSize: 12, marginTop: 6 }}>Verifica la conexión con CoinGecko</div>
         </div>
       )}

@@ -2,6 +2,8 @@
 // Props: item: { id, name, score, label, labelColor, breakdown }
 //        rank?: number, onClick?: fn
 
+import { clickableDivProps } from '../../utils/a11y';
+
 const COLOR_MAP = {
   green:  'var(--color-green)',
   blue:   'var(--color-blue)',
@@ -28,7 +30,7 @@ export default function ScoreCard({ item, rank, onClick }) {
   const bg    = BG_MAP[item.labelColor]   || 'var(--color-blue-dim)';
 
   return (
-    <div onClick={onClick} style={{
+    <div {...clickableDivProps(onClick)} style={{
       padding: '14px 16px', borderRadius: 'var(--radius-lg)',
       background: 'var(--bg-surface)', border: '1px solid var(--border)',
       boxShadow: 'var(--shadow-card)', cursor: onClick ? 'pointer' : 'default',

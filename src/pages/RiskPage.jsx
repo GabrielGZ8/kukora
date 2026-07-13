@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
-import { ErrorState, EmptyState } from '../components/common/StateViews';
+import { useTranslation } from '../i18n/I18nContext';
+
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 const COINS = [
@@ -13,18 +14,21 @@ const COINS = [
   { id: 'cardano',     label: 'ADA', color: '#0033AD' },
 ];
 const PERIODS = [{ label: '7d', days: 7 }, { label: '30d', days: 30 }, { label: '90d', days: 90 }];
-const GRADE_CFG = {
-  A: { color: 'var(--color-green)',  bg: 'var(--color-green-dim)',  label: 'Riesgo Bajo' },
-  B: { color: 'var(--color-blue)',   bg: 'var(--color-blue-dim)',   label: 'Riesgo Moderado' },
-  C: { color: 'var(--color-yellow)', bg: 'var(--color-yellow-dim)', label: 'Riesgo Alto' },
-  D: { color: 'var(--color-red)',    bg: 'var(--color-red-dim)',    label: 'Riesgo Muy Alto' },
-};
 const REGIME_CFG = {
   trending_up:   { icon: '▲', color: 'var(--color-green)' },
   trending_down: { icon: '▼', color: 'var(--color-red)' },
   ranging:       { icon: '↔', color: 'var(--color-yellow)' },
   volatile:      { icon: '🌪', color: 'var(--color-red)' },
 };
+
+function gradeCfg(t) {
+  return {
+    A: { color: 'var(--color-green)',  bg: 'var(--color-green-dim)',  label: t('risk.gradeRiskLow') },
+    B: { color: 'var(--color-blue)',   bg: 'var(--color-blue-dim)',   label: t('risk.gradeRiskModerate') },
+    C: { color: 'var(--color-yellow)', bg: 'var(--color-yellow-dim)', label: t('risk.gradeRiskHigh') },
+    D: { color: 'var(--color-red)',    bg: 'var(--color-red-dim)',    label: t('risk.gradeRiskVeryHigh') },
+  };
+}
 
 function CorrCell({ value }) {
   const abs = Math.abs(value);
@@ -42,8 +46,8 @@ function CorrCell({ value }) {
   );
 }
 
-function RiskGauge({ score, grade }) {
-  const cfg  = GRADE_CFG[grade] || GRADE_CFG.C;
+function RiskGauge({ score, grade, t }) {
+  const cfg  = gradeCfg(t)[grade] || gradeCfg(t).C;
   const pct  = score / 100;
   const r    = 54, cx = 70, cy = 70;
   const circ = Math.PI * r; // half circle
@@ -58,30 +62,32 @@ function RiskGauge({ score, grade }) {
         <text x={cx} y={cy + 14} textAnchor="middle" fontSize={10} fill="var(--text-muted)">/ 100</text>
       </svg>
       <span style={{ fontSize: 11, fontWeight: 800, color: cfg.color, background: cfg.bg, padding: '3px 10px', borderRadius: 99, marginTop: -4 }}>
-        Grade {grade} · {cfg.label}
+        {t('risk.gradeLabel')} {grade} · {cfg.label}
       </span>
     </div>
   );
 }
 
 export default function RiskPage() {
+  const { t } = useTranslation();
   const [coin, setCoin]         = useState(COINS[0]);
   const [period, setPeriod]     = useState(PERIODS[1]);
   const [showReport, setShowReport] = useState(false);
   const corrCoins = COINS.map(c => c.id).join(',');
+  const GRADE_CFG = gradeCfg(t);
 
-  const { data: risk, loading: rL } = usePolling(
+  const { data: risk, loading: rL, error: riskErr, refetch: refetchRisk } = usePolling(
     () => api.get(`/api/crypto/coin/${coin.id}/risk?days=${period.days}`),
     120_000, [coin.id, period.days]
   );
 
-  const { data: corr, loading: cL } = usePolling(
+  const { data: corr, loading: cL, error: corrErr, refetch: refetchCorr } = usePolling(
     () => api.get(`/api/crypto/correlation?coins=${corrCoins}&days=${period.days}`),
     180_000, [period.days]
   );
 
   const radarData = risk?.risk?.components ? Object.entries(risk.risk.components).map(([k, v]) => ({
-    metric: k === 'volatility' ? 'Volatilidad' : k === 'drawdown' ? 'Drawdown' : k === 'var95' ? 'VaR 95%' : 'Sesgo',
+    metric: k === 'volatility' ? t('risk.radarVolatility') : k === 'drawdown' ? t('risk.radarDrawdown') : k === 'var95' ? t('risk.radarVar95') : t('risk.radarSkew'),
     value: v,
   })) : [];
 
@@ -93,8 +99,8 @@ export default function RiskPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>◉ Risk Engine</h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Análisis de riesgo cuantitativo · VaR · Sharpe · Sortino · Correlación</p>
+          <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{t('risk.title')}</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('risk.subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {PERIODS.map(p => (
@@ -102,7 +108,7 @@ export default function RiskPage() {
           ))}
           {risk && (
             <button className="btn btn-sm btn-secondary" onClick={() => setShowReport(true)} style={{ marginLeft: 6 }}>
-              📄 Reporte
+              📄 {t('risk.report')}
             </button>
           )}
         </div>
@@ -121,30 +127,36 @@ export default function RiskPage() {
 
       {rL ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><div className="spinner" /></div>
+      ) : riskErr && !risk ? (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 40, marginBottom: 20 }}>
+          <span style={{ fontSize: 13, color: 'var(--color-red)', fontWeight: 600 }}>{t('risk.loadErrorPrefix')} {coin.label}.</span>
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{riskErr}</span>
+          <button className="btn btn-sm btn-secondary" onClick={refetchRisk}>{t('risk.retry')}</button>
+        </div>
       ) : risk ? (
         <>
           {/* Top row: gauge + regime + raw metrics */}
           <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr 1fr', gap: 16, marginBottom: 20 }}>
             {/* Risk Score Gauge */}
             <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Risk Score</div>
-              <RiskGauge score={risk.risk.score} grade={risk.risk.grade} />
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('risk.riskScore')}</div>
+              <RiskGauge score={risk.risk.score} grade={risk.risk.grade} t={t} />
             </div>
 
             {/* Regime */}
             <div className="card">
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Régimen de Mercado</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>{t('risk.marketRegime')}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <span style={{ fontSize: 32 }}>{regimeCfg.icon}</span>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 800, color: regimeCfg.color }}>{regime?.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Período {period.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t('risk.period')} {period.label}</div>
                 </div>
               </div>
               {[
-                { label: 'Volatilidad diaria', value: `${((regime?.vol || 0) * 100).toFixed(2)}%` },
-                { label: 'Fuerza tendencia',   value: `${regime?.trend > 0 ? '+' : ''}${regime?.trend || 0}%` },
-                { label: 'Drawdown período',   value: `${regime?.drawdown || 0}%` },
+                { label: t('risk.dailyVolatility'), value: `${((regime?.vol || 0) * 100).toFixed(2)}%` },
+                { label: t('risk.trendStrength'),   value: `${regime?.trend > 0 ? '+' : ''}${regime?.trend || 0}%` },
+                { label: t('risk.drawdownPeriod'),   value: `${regime?.drawdown || 0}%` },
               ].map(r => (
                 <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <span style={{ color: 'var(--text-muted)' }}>{r.label}</span>
@@ -155,14 +167,14 @@ export default function RiskPage() {
 
             {/* Raw risk metrics */}
             <div className="card">
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Métricas de Riesgo</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>{t('risk.riskMetrics')}</div>
               {[
-                { label: 'Sharpe Ratio',   value: risk.risk.raw?.sharpe,  good: v => v > 1,    fmt: v => v?.toFixed(4) },
-                { label: 'Sortino Ratio',  value: risk.risk.raw?.sortino, good: v => v > 1,    fmt: v => v?.toFixed(4) },
-                { label: 'Calmar Ratio',   value: risk.risk.raw?.calmar,  good: v => v > 0.5,  fmt: v => v?.toFixed(4) },
-                { label: 'VaR 95% (1d)',   value: risk.risk.raw?.var95,   good: () => false,   fmt: v => `${v?.toFixed(2)}%` },
-                { label: 'Volatilidad',    value: risk.risk.raw?.vol,     good: () => false,   fmt: v => `${(v*100)?.toFixed(2)}%` },
-                { label: 'Skewness',       value: risk.risk.raw?.skew,    good: v => v > 0,    fmt: v => v?.toFixed(4) },
+                { label: t('risk.metricSharpe'),   value: risk.risk.raw?.sharpe,  good: v => v > 1,    fmt: v => v?.toFixed(4) },
+                { label: t('risk.metricSortino'),  value: risk.risk.raw?.sortino, good: v => v > 1,    fmt: v => v?.toFixed(4) },
+                { label: t('risk.metricCalmar'),   value: risk.risk.raw?.calmar,  good: v => v > 0.5,  fmt: v => v?.toFixed(4) },
+                { label: t('risk.metricVar95'),   value: risk.risk.raw?.var95,   good: () => false,   fmt: v => `${v?.toFixed(2)}%` },
+                { label: t('risk.metricVolatility'),    value: risk.risk.raw?.vol,     good: () => false,   fmt: v => `${(v*100)?.toFixed(2)}%` },
+                { label: t('risk.metricSkewness'),       value: risk.risk.raw?.skew,    good: v => v > 0,    fmt: v => v?.toFixed(4) },
               ].map(r => (
                 <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <span style={{ color: 'var(--text-muted)' }}>{r.label}</span>
@@ -178,22 +190,22 @@ export default function RiskPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
             {/* Radar */}
             <div className="card">
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>Perfil de Riesgo (Radar)</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>{t('risk.riskProfileRadar')}</div>
               <ResponsiveContainer width="100%" height={220}>
                 <RadarChart data={radarData}>
                   <PolarGrid stroke="var(--border)" />
                   <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
-                  <Radar name="Riesgo" dataKey="value" stroke={coin.color} fill={coin.color} fillOpacity={0.18} strokeWidth={2} />
-                  <Tooltip formatter={(v) => [`${v}`, 'Score de riesgo']} />
+                  <Radar name="Risk" dataKey="value" stroke={coin.color} fill={coin.color} fillOpacity={0.18} strokeWidth={2} />
+                  <Tooltip formatter={(v) => [`${v}`, t('risk.riskScoreTooltip')]} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>
 
             {/* Support & Resistance */}
             <div className="card">
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>Soporte & Resistencia</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>{t('risk.supportResistance')}</div>
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-red)', marginBottom: 8 }}>Resistencias</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-red)', marginBottom: 8 }}>{t('risk.resistances')}</div>
                 {(sr?.resistances || []).slice(-3).reverse().map((r, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 10px', background: 'var(--color-red-dim)', borderRadius: 'var(--radius-sm)', marginBottom: 6, border: '1px solid rgba(240,62,62,0.2)' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>R{i + 1}</span>
@@ -202,7 +214,7 @@ export default function RiskPage() {
                 ))}
               </div>
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-green)', marginBottom: 8 }}>Soportes</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-green)', marginBottom: 8 }}>{t('risk.supports')}</div>
                 {(sr?.supports || []).slice(-3).map((s, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 10px', background: 'var(--color-green-dim)', borderRadius: 'var(--radius-sm)', marginBottom: 6, border: '1px solid rgba(0,184,122,0.2)' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>S{i + 1}</span>
@@ -219,17 +231,23 @@ export default function RiskPage() {
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>Matriz de Correlación</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Correlación de Pearson entre retornos · {period.label} · verde=positiva, rojo=negativa</div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>{t('risk.correlationMatrix')}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t('risk.correlationSubtitle')} · {period.label} · {t('risk.greenPositiveRedNegative')}</div>
           </div>
           {cL && <div className="spinner" />}
         </div>
+        {corrErr && !corr?.matrix && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 20px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--color-red)', fontWeight: 600 }}>{t('risk.correlationLoadError')}</span>
+            <button className="btn btn-sm btn-secondary" onClick={refetchCorr}>{t('risk.retry')}</button>
+          </div>
+        )}
         {corr?.matrix && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface-2)' }}>
-                  <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'left', border: '1px solid var(--border)' }}>Asset</th>
+                  <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'left', border: '1px solid var(--border)' }}>{t('risk.asset')}</th>
                   {corr.ids.map(id => (
                     <th key={id} style={{ padding: '10px 14px', fontSize: 11, fontWeight: 700, color: 'var(--text)', textAlign: 'center', border: '1px solid var(--border)' }}>
                       {COINS.find(c => c.id === id)?.label || id}
@@ -260,48 +278,48 @@ export default function RiskPage() {
           onClick={e => { if(e.target===e.currentTarget) setShowReport(false); }}>
           <div style={{ background:'var(--bg-elevated)', borderRadius:'var(--radius-xl)', padding:'28px 32px', maxWidth:560, width:'100%', boxShadow:'var(--shadow-lg)', maxHeight:'85vh', overflowY:'auto' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
-              <div style={{ fontSize:15, fontWeight:800 }}>📄 Reporte de Riesgo — {coin.label}</div>
+              <div style={{ fontSize:15, fontWeight:800 }}>{t('risk.reportTitlePrefix')} {coin.label}</div>
               <button onClick={() => setShowReport(false)} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'var(--text-muted)' }}>✕</button>
             </div>
-            <pre style={{ fontFamily:'monospace', fontSize:12, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text)', background:'var(--bg-surface-2)', padding:16, borderRadius:'var(--radius)' }}>
+            <pre data-report-text style={{ fontFamily:'monospace', fontSize:12, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text)', background:'var(--bg-surface-2)', padding:16, borderRadius:'var(--radius)' }}>
 {`KUKORA RISK REPORT
 ═══════════════════════════════════
-Activo:    ${coin.label}
-Período:   ${period.label}
-Fecha:     ${new Date().toLocaleDateString('es-MX')}
+${t('risk.reportAsset')}:    ${coin.label}
+${t('risk.reportPeriod')}:   ${period.label}
+${t('risk.reportDate')}:     ${new Date().toLocaleDateString('es-MX')}
 
-SCORE DE RIESGO
+${t('risk.reportScoreHeader')}
 ───────────────────────────────────
-Score:     ${risk.risk?.score} / 100
-Grade:     ${risk.risk?.grade} (${GRADE_CFG[risk.risk?.grade]?.label || '—'})
+${t('risk.reportScore')}:     ${risk.risk?.score} / 100
+${t('risk.reportGrade')}:     ${risk.risk?.grade} (${GRADE_CFG[risk.risk?.grade]?.label || '—'})
 
-Componentes:
-  Volatilidad:    ${risk.risk?.components?.volatility?.toFixed(1) || '—'}
-  Drawdown:       ${risk.risk?.components?.drawdown?.toFixed(1) || '—'}
-  VaR 95%:        ${risk.risk?.components?.var95?.toFixed(1) || '—'}
-  Sesgo:          ${risk.risk?.components?.skewPenalty?.toFixed(1) || '—'}
+${t('risk.reportComponents')}:
+  ${t('risk.reportVolatility')}:    ${risk.risk?.components?.volatility?.toFixed(1) || '—'}
+  ${t('risk.reportDrawdown')}:       ${risk.risk?.components?.drawdown?.toFixed(1) || '—'}
+  ${t('risk.reportVar95')}:        ${risk.risk?.components?.var95?.toFixed(1) || '—'}
+  ${t('risk.reportSkew')}:          ${risk.risk?.components?.skewPenalty?.toFixed(1) || '—'}
 
-RÉGIMEN DE MERCADO
+${t('risk.reportRegimeHeader')}
 ───────────────────────────────────
-Régimen:          ${risk.regime?.label || '—'}
-Volatilidad:      ${((risk.regime?.vol || 0)*100).toFixed(2)}%
-Tendencia:        ${risk.regime?.trend > 0 ? '+' : ''}${risk.regime?.trend || 0}%
-Drawdown período: ${risk.regime?.drawdown || 0}%
+${t('risk.reportRegime')}:          ${risk.regime?.label || '—'}
+${t('risk.reportVolatility')}:      ${((risk.regime?.vol || 0)*100).toFixed(2)}%
+${t('risk.reportTrend')}:        ${risk.regime?.trend > 0 ? '+' : ''}${risk.regime?.trend || 0}%
+${t('risk.reportDrawdownPeriod')}: ${risk.regime?.drawdown || 0}%
 
-SOPORTE & RESISTENCIA
+${t('risk.reportSupportResistanceHeader')}
 ───────────────────────────────────
-Resistencias: ${(risk.supportResistance?.resistances || []).slice(-3).reverse().map(r => '$'+r.toLocaleString('en',{maximumFractionDigits:2})).join(', ') || '—'}
-Soportes:     ${(risk.supportResistance?.supports || []).slice(-3).map(s => '$'+s.toLocaleString('en',{maximumFractionDigits:2})).join(', ') || '—'}
+${t('risk.resistances')}: ${(risk.supportResistance?.resistances || []).slice(-3).reverse().map(r => '$'+r.toLocaleString('en',{maximumFractionDigits:2})).join(', ') || '—'}
+${t('risk.supports')}:     ${(risk.supportResistance?.supports || []).slice(-3).map(s => '$'+s.toLocaleString('en',{maximumFractionDigits:2})).join(', ') || '—'}
 
-CONCLUSIÓN
+${t('risk.reportConclusionHeader')}
 ───────────────────────────────────
-${risk.risk?.grade === 'A' ? 'Riesgo BAJO. Volatilidad controlada. Adecuado para estrategias de largo plazo.' :
-  risk.risk?.grade === 'B' ? 'Riesgo MODERADO. Requiere gestión activa y stops definidos.' :
-  risk.risk?.grade === 'C' ? 'Riesgo ALTO. Solo para alta tolerancia al riesgo, horizonte corto.' :
-  'Riesgo MUY ALTO. Máxima precaución, posición reducida.'}
+${risk.risk?.grade === 'A' ? t('risk.conclusionLow') :
+  risk.risk?.grade === 'B' ? t('risk.conclusionModerate') :
+  risk.risk?.grade === 'C' ? t('risk.conclusionHigh') :
+  t('risk.conclusionVeryHigh')}
 
 ─────────────────────────────────
-Generado por kukora · Mercado Cripto`}
+${t('risk.reportFooter')}`}
             </pre>
             <div style={{ display:'flex', gap:8, marginTop:16, justifyContent:'flex-end' }}>
               <button className="btn btn-secondary btn-sm"
@@ -309,9 +327,9 @@ Generado por kukora · Mercado Cripto`}
                   const text = document.querySelector('[data-report-text]')?.textContent;
                   navigator.clipboard.writeText(text || '');
                 }}>
-                📋 Copiar
+                📋 {t('risk.copy')}
               </button>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowReport(false)}>Cerrar</button>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowReport(false)}>{t('risk.close')}</button>
             </div>
           </div>
         </div>

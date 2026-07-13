@@ -2,11 +2,19 @@ import { useState, useCallback, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Layout from './components/layout/Layout';
-import SplashScreen from './components/SplashScreen';
+import SplashScreen from './components/common/SplashScreen'; // Issue 18: use canonical common/ version
+import ErrorBoundary from './components/common/ErrorBoundary';
+import PageSkeleton from './components/common/PageSkeleton';
+import { AppStateProvider } from './state/AppStateContext';
+import { AuthProvider, useAuth } from './state/AuthContext';
+import { I18nProvider } from './i18n/I18nContext';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
 
-// Lazy loading — cada página solo carga cuando se navega a ella
-// Esto evita que TODAS las páginas hagan polling al mismo tiempo al inicio
+// Lazy loading — each page only loads when navigated to.
+// This prevents all pages from initiating polling simultaneously on load.
 const ArbitragePage         = lazy(() => import('./pages/ArbitragePage'));
+const ExecutiveDashboardPage = lazy(() => import('./pages/ExecutiveDashboardPage'));
 const DashboardPage         = lazy(() => import('./pages/DashboardPage'));
 const MarketsPage           = lazy(() => import('./pages/MarketsPage'));
 const WatchlistPage         = lazy(() => import('./pages/WatchlistPage'));
@@ -26,13 +34,23 @@ const MarketRegimePage      = lazy(() => import('./pages/MarketRegimePage'));
 const CorrelationGalaxyPage = lazy(() => import('./pages/CorrelationGalaxyPage'));
 const AnalyticsPage         = lazy(() => import('./pages/AnalyticsPage'));
 const AboutPage             = lazy(() => import('./pages/AboutPage'));
+const SummaryPage           = lazy(() => import('./pages/SummaryPage'));
+const ArbBacktestPage       = lazy(() => import('./pages/ArbBacktestPage'));
+const TenantComparisonPage  = lazy(() => import('./pages/TenantComparisonPage'));
+const SettingsPage          = lazy(() => import('./pages/SettingsPage'));
+const ProfilePage           = lazy(() => import('./pages/ProfilePage'));
+const ErrorPage             = lazy(() => import('./pages/ErrorPage'));
+import NotFoundPage from './pages/NotFoundPage';
 
 function PageLoader() {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
-      <div className="spinner" />
-    </div>
-  );
+  return <PageSkeleton />;
+}
+
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <PageSkeleton />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return children;
 }
 
 export default function App() {
@@ -43,7 +61,11 @@ export default function App() {
     <>
       {!splashDone && <SplashScreen onFinish={handleSplashFinish} />}
 
-      <BrowserRouter>
+      <ErrorBoundary>
+      <I18nProvider>
+      <AuthProvider>
+      <AppStateProvider>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Toaster
           position="top-right"
           toastOptions={{
@@ -58,8 +80,12 @@ export default function App() {
           }}
         />
         <Routes>
-          <Route element={<Layout />}>
-            <Route path="/"             element={<Navigate to="/arbitrage" replace />} />
+          <Route path="/login"    element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+            <Route path="/"             element={<Navigate to="/executive" replace />} />
+            <Route path="/executive"    element={<Suspense fallback={<PageLoader />}><ExecutiveDashboardPage /></Suspense>} />
+            <Route path="/summary"      element={<Suspense fallback={<PageLoader />}><SummaryPage /></Suspense>} />
             <Route path="/arbitrage"    element={<Suspense fallback={<PageLoader />}><ArbitragePage /></Suspense>} />
             <Route path="/dashboard"    element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
             <Route path="/markets"      element={<Suspense fallback={<PageLoader />}><MarketsPage /></Suspense>} />
@@ -73,6 +99,8 @@ export default function App() {
             <Route path="/alerts"       element={<Suspense fallback={<PageLoader />}><AlertsPage /></Suspense>} />
             <Route path="/montecarlo"   element={<Suspense fallback={<PageLoader />}><MonteCarloPage /></Suspense>} />
             <Route path="/backtest"     element={<Suspense fallback={<PageLoader />}><BacktestPage /></Suspense>} />
+            <Route path="/arb-backtest" element={<Suspense fallback={<PageLoader />}><ArbBacktestPage /></Suspense>} />
+            <Route path="/tenant-compare" element={<Suspense fallback={<PageLoader />}><TenantComparisonPage /></Suspense>} />
             <Route path="/heatmap"      element={<Suspense fallback={<PageLoader />}><HeatmapPage /></Suspense>} />
             <Route path="/compare"      element={<Suspense fallback={<PageLoader />}><ComparePage /></Suspense>} />
             <Route path="/analyze"      element={<Suspense fallback={<PageLoader />}><AnalyzePage /></Suspense>} />
@@ -80,10 +108,18 @@ export default function App() {
             <Route path="/regime"       element={<Suspense fallback={<PageLoader />}><MarketRegimePage /></Suspense>} />
             <Route path="/galaxy"       element={<Suspense fallback={<PageLoader />}><CorrelationGalaxyPage /></Suspense>} />
             <Route path="/about"        element={<Suspense fallback={<PageLoader />}><AboutPage /></Suspense>} />
+            <Route path="/settings"     element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
+            <Route path="/profile"      element={<Suspense fallback={<PageLoader />}><ProfilePage /></Suspense>} />
           </Route>
-          <Route path="*" element={<Navigate to="/arbitrage" replace />} />
+          <Route path="/404" element={<NotFoundPage />} />
+          <Route path="/error" element={<Suspense fallback={<PageLoader />}><ErrorPage /></Suspense>} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
+      </AppStateProvider>
+      </AuthProvider>
+      </I18nProvider>
+      </ErrorBoundary>
     </>
   );
 }

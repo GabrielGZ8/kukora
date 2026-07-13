@@ -1,9 +1,9 @@
 // ─── AlertsPage.jsx — Price Alerts with MongoDB + localStorage fallback ───
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { api } from '../api';
 import { PageHeader } from '../components/common/PageHeader';
-import { ErrorState, EmptyState, SyncBadge } from '../components/common/StateViews';
+import { EmptyState, SyncBadge } from '../components/common/StateViews';
 import toast from 'react-hot-toast';
 
 const STORAGE_KEY   = 'kukora_alerts_v1';
@@ -21,7 +21,7 @@ const fmt = n => n == null ? '—' : n >= 1
 
 // ─── localStorage helpers ──────────────────────────────────────────────────
 const ls_load = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } };
-const ls_save = a  => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(a)); } catch {} };
+const ls_save = a  => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(a)); } catch { /* private browsing */ } };
 
 // ─── Normalize server alert → local shape ─────────────────────────────────
 const normalizeAlert = a => ({
@@ -44,7 +44,6 @@ export default function AlertsPage() {
   const [prices,      setPrices]      = useState({});
   const [form,        setForm]        = useState({ coinId: 'bitcoin', type: 'above', price: '' });
   const [showAdd,     setShowAdd]     = useState(false);
-  const [error,       setError]       = useState(null);
 
   // ── Load from server or fallback ─────────────────────────────────────────
   const loadAlerts = useCallback(async () => {
@@ -79,7 +78,7 @@ export default function AlertsPage() {
   const addAlert = async () => {
     const price = parseFloat(form.price);
     if (!form.coinId || isNaN(price) || price <= 0) {
-      toast.error('Ingresa un precio válido'); return;
+      toast.error('Enter a valid price'); return;
     }
     const coin = COINS_LIST.find(c => c.id === form.coinId);
     const payload = {
@@ -103,9 +102,9 @@ export default function AlertsPage() {
       }
       setForm(f => ({ ...f, price: '' }));
       setShowAdd(false);
-      toast.success(`Alerta creada: ${coin?.symbol} ${form.type === 'above' ? '≥' : '≤'} ${fmt(price)}`);
+      toast.success(`Alert created: ${coin?.symbol} ${form.type === 'above' ? '≥' : '≤'} ${fmt(price)}`);
     } catch (e) {
-      toast.error(e.message || 'Error al crear alerta');
+      toast.error(e.message || 'Failed to create alert');
     }
   };
 
@@ -113,16 +112,16 @@ export default function AlertsPage() {
   const removeAlert = async (id) => {
     const next = alerts.filter(a => a.id !== id);
     setAlerts(next); ls_save(next);
-    try { if (serverOk) await api.alerts.delete(id); } catch {}
-    toast.success('Alerta eliminada');
+    try { if (serverOk) await api.alerts.delete(id); } catch { /* server delete is best-effort; localStorage is source of truth */ }
+    toast.success('Alert deleted');
   };
 
   // ── Reset triggered alert ─────────────────────────────────────────────────
   const resetAlert = async (id) => {
     const next = alerts.map(a => a.id === id ? { ...a, triggered: false, triggeredAt: null } : a);
     setAlerts(next); ls_save(next);
-    try { if (serverOk) await api.alerts.update(id, { triggered: false }); } catch {}
-    toast.success('Alerta reactivada');
+    try { if (serverOk) await api.alerts.update(id, { triggered: false }); } catch { /* best-effort server sync */ }
+    toast.success('Alert reactivada');
   };
 
   const active    = alerts.filter(a => !a.triggered);
@@ -133,15 +132,15 @@ export default function AlertsPage() {
   return (
     <div className="page-enter">
       <PageHeader
-        title="Alertas de Precio"
-        description="Notificaciones cuando un activo alcance tu precio objetivo · monitoreo cada 30s"
+        title="Alerts de Price"
+        description="Notifications cuando un active alcance tu price objetivo · monitoring cada 30s"
         live
         badge={serverOk ? 'MongoDB' : 'Local'}
         badgeColor={serverOk ? 'var(--color-green)' : 'var(--color-yellow)'}
-        help="Las alertas se monitorizan en background aunque cambies de página. Se guardan en MongoDB si está disponible."
+        help="Las alerts se monitorizan en background aunque cambies de página. Se guardan en MongoDB si está available."
         actions={
           <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(s => !s)}>
-            {showAdd ? '✕ Cancelar' : '+ Nueva alerta'}
+            {showAdd ? '✕ Cancel' : '+ New alert'}
           </button>
         }
       />
@@ -149,24 +148,24 @@ export default function AlertsPage() {
       {/* Add form */}
       {showAdd && (
         <div className="card" style={{ marginBottom: 20, padding: '18px 20px', border: '1px solid rgba(255,45,120,0.2)' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Configurar alerta</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Configure alert</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Activo</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Asset</div>
               <select style={sel} value={form.coinId} onChange={e => setForm(f => ({ ...f, coinId: e.target.value }))}>
                 {COINS_LIST.map(c => <option key={c.id} value={c.id}>{c.symbol}</option>)}
               </select>
             </div>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Condición</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Condition</div>
               <select style={sel} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-                <option value="above">Precio ≥ objetivo</option>
-                <option value="below">Precio ≤ objetivo</option>
+                <option value="above">Price ≥ objetivo</option>
+                <option value="below">Price ≤ objetivo</option>
               </select>
             </div>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
-                Precio objetivo ($)
+                Price objetivo ($)
                 {prices[form.coinId] && <span style={{ fontWeight: 400, color: 'var(--text-dim)', marginLeft: 6 }}>actual: {fmt(prices[form.coinId])}</span>}
               </div>
               <input className="input" type="number" min="0" step="any" placeholder="ej. 100000"
@@ -175,7 +174,7 @@ export default function AlertsPage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="btn btn-primary btn-sm" onClick={addAlert}>Crear alerta</button>
+            <button className="btn btn-primary btn-sm" onClick={addAlert}>Create alert</button>
             <SyncBadge serverAvailable={serverOk} />
           </div>
         </div>
@@ -185,16 +184,16 @@ export default function AlertsPage() {
       <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="pulse-dot" />
-          <span style={{ fontSize: 13, fontWeight: 700 }}>Alertas activas</span>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Alerts activas</span>
           <span style={{ fontSize: 11, color: 'var(--text-dim)', background: 'var(--bg-surface-2)', padding: '1px 8px', borderRadius: 99, fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{active.length}</span>
           <span style={{ marginLeft: 'auto' }}><SyncBadge serverAvailable={serverOk} /></span>
         </div>
         {loadingInit ? (
           <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><div className="spinner" /></div>
         ) : active.length === 0 ? (
-          <EmptyState icon="🔔" title="Sin alertas activas"
-            description="Crea una alerta para recibir notificaciones cuando el precio alcance tu objetivo"
-            action="+ Crear alerta" onAction={() => setShowAdd(true)} />
+          <EmptyState icon="🔔" title="Sin alerts activas"
+            description="Crea una alert para recibir notifications cuando el price alcance tu objetivo"
+            action="+ Create alert" onAction={() => setShowAdd(true)} />
         ) : (
           active.map(a => {
             const current = prices[a.coinId];

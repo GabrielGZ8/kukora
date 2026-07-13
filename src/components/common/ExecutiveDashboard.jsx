@@ -1,5 +1,5 @@
 /**
- * ExecutiveDashboard.jsx — Kukora Hackathon
+ * ExecutiveDashboard.jsx — Kukora
  *
  * One-screen judge-facing summary with ALL key metrics:
  * opportunities, trades, profit, latency, risk, reliability,
@@ -94,7 +94,7 @@ function ReliabilityTable({ data = [] }) {
 function PredictedCard({ pred }) {
   if (!pred) return (
     <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>
-      Acumulando datos históricos…
+      Accumulating historical data…
     </div>
   );
   return (
@@ -109,7 +109,7 @@ function PredictedCard({ pred }) {
           {pred.pair}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-          {pred.currentlyActive ? '● Activa ahora' : '○ No activa'}
+          {pred.currentlyActive ? '● Activa ahour' : '○ No activa'}
           {pred.historicalSuccessRate != null && ` · ${pred.historicalSuccessRate}% win hist.`}
           {pred.expectedProfit != null && ` · E[P]=$${pred.expectedProfit.toFixed(4)}`}
         </div>
@@ -126,7 +126,7 @@ function PredictedCard({ pred }) {
 
 // ─── Best Opportunity Card ─────────────────────────────────────────────────
 function BestOppCard({ opp }) {
-  if (!opp) return <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>Sin datos de sesión aún…</div>;
+  if (!opp) return <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>No session data yet…</div>;
   return (
     <div style={{
       background: opp.netProfit >= 0 ? 'rgba(0,184,122,0.06)' : 'var(--bg-surface-2)',
@@ -149,7 +149,7 @@ function BestOppCard({ opp }) {
         }}>
           {opp.netProfit >= 0 ? '+' : ''}${opp.netProfit.toFixed(4)}
         </div>
-        <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>mejor de sesión</div>
+        <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>mejor de la sesión</div>
       </div>
     </div>
   );
@@ -159,8 +159,8 @@ function BestOppCard({ opp }) {
 export default function ExecutiveDashboard({ data }) {
   const pnl               = data?.pnl               || {};
   const volatility        = data?.volatilityStatus   || {};
-  const reliability       = data?.reliabilityLeaderboard || [];
-  const exRanking         = data?.exchangeRanking    || [];
+  const reliability       = useMemo(() => data?.reliabilityLeaderboard || [], [data?.reliabilityLeaderboard]);
+  const exRanking         = useMemo(() => data?.exchangeRanking    || [], [data?.exchangeRanking]);
   const predicted         = data?.predictiveRanking?.[0];
   const bestOpp           = data?.bestOpportunitySeen;
   const nearViable        = data?.nearViableCount    || 0;
@@ -173,6 +173,9 @@ export default function ExecutiveDashboard({ data }) {
     ? Object.values(data.wsStatus).filter(Boolean).length
     : 0;
   const bestExchange      = exRanking[0]?.exchange   || '—';
+  // config en vivo
+  const engineConfig      = data?.engineConfig       || {};
+  const configChangedKeys = Array.isArray(data?.configChanged) ? data.configChanged : [];
   const avgLatency        = useMemo(() => {
     const valid = exRanking.filter(e => e.avgLatency != null);
     if (!valid.length) return null;
@@ -194,10 +197,10 @@ export default function ExecutiveDashboard({ data }) {
       }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-0.02em' }}>
-             Executive Dashboard
+             ▣ Executive Dashboard — Judge Mode
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-            Kukora · Arbitrage Bot · Coding Challenge Mexico — Bitcoin Arbitrage
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, lineHeight:1.5 }}>
+            Consolidated operational view. All KPIs in one screen — detection, execution, capital, risk and latency.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -214,20 +217,24 @@ export default function ExecutiveDashboard({ data }) {
 
       {/* KPI Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-        <Tile icon="" label="Oportunidades Totales"  value={scanned.toLocaleString()} color="var(--text)" />
-        <Tile icon="" label="Oportunidades Viables"  value={viable.toLocaleString()} color="var(--color-green)" pulse={viable > 0} />
+        <Tile icon="" label="Total Opportunities"  value={scanned.toLocaleString()} color="var(--text)" />
+        <Tile icon="" label="Viable Opportunities"  value={viable.toLocaleString()} color="var(--color-green)" pulse={viable > 0} />
         <Tile icon="" label="Trades Ejecutados"      value={trades.toLocaleString()} color="var(--color-green)" />
-        <Tile icon="⚠" label="Cerca Viables"           value={nearViable.toLocaleString()} color="var(--color-yellow)" sub="dentro del doble del mínimo" />
+        <Tile icon="⚠" label="Near Viable"           value={nearViable.toLocaleString()} color="var(--color-yellow)" sub="within double the minimum" />
 
-        <Tile icon="" label="P&L Hoy"
-          value={pnl.totalPnl != null ? `$${pnl.totalPnl >= 0 ? '+' : ''}${fmt(pnl.totalPnl, 4)}` : '—'}
+        <Tile icon="" label="P&L Neto"
+          value={pnl.totalPnl != null ? `${pnl.totalPnl >= 0 ? '+' : '-'}$${fmt(Math.abs(pnl.totalPnl), 4)}` : '—'}
           color={pnl.totalPnl >= 0 ? 'var(--color-green)' : 'var(--color-red)'}
-          sub={`Session P&L`} />
+          sub="Realizado + MTM" />
+        <Tile icon="" label="Capture Rate"
+          value={pnl.captureRate != null ? `${pnl.captureRate}%` : (trades > 0 && scanned > 0 ? `${((trades/scanned)*100).toFixed(1)}%` : '—')}
+          color="var(--color-green)"
+          sub="trades / opportunities" />
         <Tile icon="" label="Win Rate"
           value={winRate ? `${winRate.toFixed(1)}%` : '—'}
           color={winRate >= 60 ? 'var(--color-green)' : winRate >= 40 ? 'var(--color-yellow)' : 'var(--text-dim)'}
           sub={`${trades} trades`} />
-        <Tile icon="⏱" label="Latencia Promedio"
+        <Tile icon="⏱" label="Latency Average"
           value={avgLatency != null ? fmtMs(avgLatency) : '—'}
           color={avgLatency != null && avgLatency < 100 ? 'var(--color-green)' : 'var(--color-yellow)'}
           sub="avg 5 exchanges" />
@@ -236,7 +243,7 @@ export default function ExecutiveDashboard({ data }) {
           color={reliabilityAvg >= 70 ? 'var(--color-green)' : reliabilityAvg >= 40 ? 'var(--color-yellow)' : 'var(--color-red)'}
           sub="composite WS + latency" />
 
-        <Tile icon="" label="Exchanges Conectados"
+        <Tile icon="" label="Exchanges Connecteds"
           value={`${connectedWs}/5`}
           color="var(--color-green)" sub="5 exchanges WS" />
         <Tile icon="" label="Mejor Exchange"
@@ -270,7 +277,7 @@ export default function ExecutiveDashboard({ data }) {
           borderRadius: 'var(--radius-lg)', padding: '14px 18px',
         }}>
           <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 12 }}>
-             Mejor Oportunidad (Sesión)
+             Mejor Opportunity (Session)
           </div>
           <BestOppCard opp={bestOpp} />
 
@@ -301,7 +308,7 @@ export default function ExecutiveDashboard({ data }) {
           borderRadius: 'var(--radius-lg)', padding: '14px 18px',
         }}>
           <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 12 }}>
-             Próxima Oportunidad Predicha
+             Next Predicted Opportunity
           </div>
           <PredictedCard pred={predicted} />
 
@@ -327,6 +334,76 @@ export default function ExecutiveDashboard({ data }) {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── v16: CONFIGURACIÓN ACTIVA DEL MOTOR ───────────────────────────────
+          Muestra el status en vivo de liveConfig — 
+      */}
+      <div style={{
+        background: configChangedKeys.length > 0
+          ? 'rgba(245,158,11,0.04)'
+          : 'var(--bg-surface)',
+        border: configChangedKeys.length > 0
+          ? '1px solid rgba(245,158,11,0.25)'
+          : '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)', padding: '14px 18px',
+      }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 12 }}>
+            ⚙️ Active engine configuration
+          </div>
+          {configChangedKeys.length > 0 ? (
+            <span style={{ fontSize:9, fontWeight:800, padding:'2px 8px', borderRadius:4, background:'rgba(245,158,11,0.15)', color:'#F59E0B', border:'1px solid rgba(245,158,11,0.3)' }}>
+              ⚡ {configChangedKeys.length} param{configChangedKeys.length > 1 ? 's' : ''} modified vs default
+            </span>
+          ) : (
+            <span style={{ fontSize:9, fontWeight:700, padding:'2px 8px', borderRadius:4, background:'rgba(0,184,122,0.08)', color:'var(--color-green)', border:'1px solid rgba(0,184,122,0.2)' }}>
+              ✓ Defaults active
+            </span>
+          )}
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:8 }}>
+          {[
+            { key:'minScore',            label:'Min Score',      unit:'pts',  icon:'🎯' },
+            { key:'tradeAmountBTC',      label:'Trade Size',     unit:'BTC',  icon:'💎' },
+            { key:'feeMode',             label:'Fee Mode',       unit:'',     icon:'💸' },
+            { key:'minNetProfitUSD',     label:'Min Profit',     unit:'USD',  icon:'💰' },
+            { key:'minSpreadPct',        label:'Min Spread',     unit:'%',    icon:'📊' },
+            { key:'maxSpreadPct',        label:'Max Spread',     unit:'%',    icon:'📈' },
+            { key:'maxDailyLossUSD',     label:'Max Loss/day',   unit:'USD',  icon:'🛑' },
+            { key:'cooldownMs',          label:'Cooldown',       unit:'ms',   icon:'⏱' },
+            { key:'minTriangularNetPct', label:'Min Triangular', unit:'%',    icon:'△' },
+            { key:'activeExchanges',     label:'Exchanges',      unit:'',     icon:'🔗' },
+          ].map(({ key, label, unit, icon }) => {
+            const val     = engineConfig[key];
+            const changed = configChangedKeys.includes(key);
+            const display = key === 'activeExchanges'
+              ? (Array.isArray(val) ? `${val.length}/5` : '5/5')
+              : val != null
+                ? (typeof val === 'number'
+                    ? (Number.isInteger(val) ? val : val.toFixed(key === 'tradeAmountBTC' ? 3 : key.includes('Pct') || key === 'minTriangularNetPct' ? 4 : 2))
+                    : val)
+                : '—';
+            return (
+              <div key={key} style={{
+                padding:'8px 10px', borderRadius:6,
+                background: changed ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.02)',
+                border: changed ? '1px solid rgba(245,158,11,0.25)' : '1px solid var(--border)',
+              }}>
+                <div style={{ fontSize:9, color:'var(--text-dim)', marginBottom:2 }}>{icon} {label}</div>
+                <div style={{ fontSize:13, fontWeight:800, fontFamily:'var(--font-mono)', color: changed ? '#F59E0B' : 'var(--text)' }}>
+                  {String(display)}{unit && <span style={{ fontSize:9, color:'var(--text-dim)', marginLeft:2 }}>{unit}</span>}
+                </div>
+                {changed && <div style={{ fontSize:8, color:'#F59E0B', marginTop:1 }}>↑ modified</div>}
+              </div>
+            );
+          })}
+        </div>
+        {configChangedKeys.length === 0 && (
+          <div style={{ marginTop:10, fontSize:10, color:'var(--text-dim)' }}>
+            Use the <strong>⚙️ Parameters</strong> tab to change any parameter live — effect is immediate without system restart.
+          </div>
+        )}
       </div>
     </div>
   );

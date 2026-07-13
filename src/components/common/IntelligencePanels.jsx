@@ -1,5 +1,3 @@
-import React from 'react';
-
 const fmtMs = ms => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms/1000).toFixed(1)}s`;
 
 // ─── Exchange Health Center ──────────────────────────────────────────
@@ -68,7 +66,7 @@ export function AIAnalystPanel({ intelligence, bestOpp }) {
       <div className="terminal-header">◈ KUKORA_AI_ANALYST [DETERMINISTIC_LOGIC]</div>
       <div style={{ padding: '15px' }}>
         <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5, fontStyle: 'italic' }}>
-          "{intelligence?.aiAnalyst || 'Analyzing current market conditions for cross-exchange inefficiencies...'}"
+          &ldquo;{intelligence?.aiAnalyst || 'Analyzing current market conditions for cross-exchange inefficiencies...'}&rdquo;
         </div>
         {bestOpp && bestOpp.netProfit > 2 && (
           <div style={{ marginTop: 12, padding: '8px', background: 'rgba(0,184,122,0.05)', borderRadius: 4, border: '1px solid rgba(0,184,122,0.1)' }}>

@@ -135,7 +135,7 @@ export default function HeatmapPage() {
           <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: '-0.5px', marginBottom: 4 }}>
             <span style={{ background: 'var(--brand-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Market</span> Heatmap
           </h2>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Top 50 coins · Tamyear = Market Cap · Click para ir a Analytics</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Top 50 coins · Tamaño = Market Cap · Click para ir a Analytics</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Colorear por:</span>

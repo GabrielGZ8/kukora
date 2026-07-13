@@ -117,7 +117,7 @@ export default function TradeAuditModal({ trade, onClose }) {
               <div>
                 <div style={{ fontSize:9, color:'var(--text-dim)', fontWeight:700, marginBottom:2 }}>BUY @ {trade.buyExchange}</div>
                 <div style={{ fontSize:16, fontWeight:900, fontFamily:'var(--font-mono)', color:'var(--color-red)' }}>${trade.buyPrice?.toLocaleString() || '—'}</div>
-                <div style={{ fontSize:9, color:'var(--text-dim)' }}>VWAP L2 · tamyear: {trade.sizeUSD ? fmt2(trade.sizeUSD) : '—'}</div>
+                <div style={{ fontSize:9, color:'var(--text-dim)' }}>VWAP L2 · tamaño: {trade.sizeUSD ? fmt2(trade.sizeUSD) : '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize:9, color:'var(--text-dim)', fontWeight:700, marginBottom:2 }}>SELL @ {trade.sellExchange}</div>

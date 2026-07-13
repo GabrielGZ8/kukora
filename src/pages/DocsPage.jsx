@@ -1,7 +1,6 @@
 // ─── DocsPage.jsx — Interactive Mathematical Documentation ───────────────
 import { useState } from 'react';
 import { PageHeader } from '../components/common/PageHeader';
-import { useTranslation } from '../i18n/I18nContext';
 
 const Code = ({ children }) => (
   <code style={{ fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-surface-2)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 6px', color: 'var(--color-primary)' }}>
@@ -121,6 +120,8 @@ function ApiReferenceContent() {
         <EndpointRow method="POST" path="/api/auth/change-password" desc="Cambia la contraseña. Exige la contraseña actual. Invalida el refreshToken (fuerza re-login)."
           params={[['currentPassword','string',true,''],['newPassword','string',true,'Minimum 8 characters']]} />
         <EndpointRow method="POST" path="/api/auth/stream-ticket" desc="Cambia el accessToken (enviado en el header Authorization) por un ticket efímero de un solo uso (TTL 30s), usado para autenticar conexiones SSE/EventSource — que no pueden enviar headers — sin nunca poner un JWT real en una URL." />
+        <EndpointRow method="POST" path="/api/auth/google" auth={false} desc="Login/registro con Google Sign-In. Verifica el idToken de Firebase en el servidor (nunca confía en el email que manda el cliente); si ya existe una cuenta con ese googleId hace login, si existe una cuenta local con el mismo email la vincula, y si no existe crea un usuario nuevo. Devuelve el mismo par accessToken + refreshToken que /login."
+          params={[['idToken','string',true,'Firebase ID token obtenido en el cliente tras el popup de Google']]} />
       </ApiSection>
 
       <ApiSection title="Notificaciones  ·  /api/notifications" color="#00b87a">
@@ -160,6 +161,128 @@ function ApiReferenceContent() {
         <EndpointRow method="GET" path="/api/arbitrage/spread-heatmap" desc="Heatmap de spread promedio por par × exchange en las últimas N horas. Para identificar pares con mayor dispersión de precio." />
         <EndpointRow method="GET" path="/api/arbitrage/execution-quality" desc="Métricas de calidad de ejecución: fill rate, slippage real vs estimado, latencia percentile (p50/p95/p99)." />
         <EndpointRow method="GET" path="/api/arbitrage/arb-backtest/summary" desc="Resumen del último backtest de arbitraje ejecutado: total opps, win rate, Sharpe, max drawdown." />
+      </ApiSection>
+
+      <ApiSection title="Trading Live — Ejecución, 2FA & Riesgo  ·  /api/trading" color="#FF2D78">
+        <EndpointRow method="GET"  path="/api/trading/audit" desc="Últimas 100 entradas del audit log de trading en vivo (cambios de modo, ejecuciones, rechazos)." />
+        <EndpointRow method="POST" path="/api/trading/test-connection" desc="Prueba unas credenciales de exchange sin guardarlas — confirma que la key autentica correctamente antes de conectar."
+          params={[['exchange','string',true,''],['apiKey','string',true,''],['apiSecret','string',true,''],['apiPassphrase','string',false,'Requerido por algunos exchanges (ej. Coinbase, OKX)']]} />
+        <EndpointRow method="POST" path="/api/trading/execute/cross" desc="Ejecuta una operación real de dos patas (compra en un exchange, venta en otro) sobre una oportunidad detectada. Requiere token 2FA vigente si el usuario tiene 2FA habilitado — mismo gate que activar modo live. Una falla parcial (una pata ejecutada, la otra no) devuelve 207 con datos de recovery."
+          params={[['opportunity','object',true,'Oportunidad detectada a ejecutar'],['amount','number',true,'Tamaño de la operación'],['twoFactorToken','string',false,'Requerido si el usuario tiene 2FA activo']]} />
+        <EndpointRow method="GET"  path="/api/trading/rate-limits" desc="Estado actual de rate limits por exchange (requests usados/disponibles)." />
+        <EndpointRow method="GET"  path="/api/trading/reconciliation" desc="Sugerencias de reconciliación de inventario entre exchanges: reactivas (umbral de concentración superado) y predictivas (sesgo direccional de los últimos trades). Cada sugerencia indica trigger: 'reactive' | 'predictive'."
+          params={[['quoteAsset','string',false,'Default: config global'],['baseAsset','string',false,'Default: config global'],['exchanges','string',false,'Lista separada por comas, ej: binance,okx']]} />
+        <EndpointRow method="POST" path="/api/trading/2fa/setup" desc="Inicia el enrolamiento TOTP: genera un secret y una otpauth URL para escanear con Google Authenticator / Authy." />
+        <EndpointRow method="POST" path="/api/trading/2fa/confirm" desc="Confirma el enrolamiento verificando un primer token válido generado por la app authenticator."
+          params={[['token','string',true,'Código TOTP de 6 dígitos']]} />
+        <EndpointRow method="GET"  path="/api/trading/2fa/status" desc="Indica si el usuario tiene 2FA habilitado." />
+        <EndpointRow method="POST" path="/api/trading/2fa/disable" desc="Deshabilita 2FA. Exige un token TOTP vigente."
+          params={[['token','string',true,'Código TOTP de 6 dígitos']]} />
+        <EndpointRow method="GET"  path="/api/trading/risk-profile" desc="Perfil de riesgo del usuario: overrides guardados y el valor 'effective' realmente aplicado (override recortado contra los límites globales vigentes de liveConfig)." />
+        <EndpointRow method="POST" path="/api/trading/risk-profile" desc="Actualiza el perfil de riesgo individual del usuario (overrides sobre los límites globales)." />
+      </ApiSection>
+
+      <ApiSection title="Crypto & Analytics Cuantitativo  ·  /api/crypto" color="#22c55e">
+        <EndpointRow method="GET" path="/api/crypto/markets" auth={false} desc="Top N coins por market cap (CoinGecko cacheado)."
+          params={[['limit','number',false,'Default 50, max 500']]} />
+        <EndpointRow method="GET" path="/api/crypto/global" auth={false} desc="Métricas globales del mercado cripto: market cap total, dominancia BTC/ETH, volumen 24h." />
+        <EndpointRow method="GET" path="/api/crypto/trending" auth={false} desc="Coins con mayor búsqueda/interés en las últimas 24h." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id" auth={false} desc="Detalle completo de una coin: precio, market cap, supply, links, descripción." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/ohlc" auth={false} desc="Velas OHLC históricas de la coin."
+          params={[['days','number',false,'Default 7']]} />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/history" auth={false} desc="Serie histórica de precio/volumen."
+          params={[['days','number',false,'Default 30']]} />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/technical" auth={false} desc="Indicadores técnicos calculados sobre la serie de precio (medias móviles, RSI, volatilidad, etc.)." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/analytics" auth={false} desc="Panel analítico agregado para la coin (combina varios indicadores en un solo response)." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/anomaly" auth={false} desc="Detección de anomalías de precio/volumen para una coin puntual. Ver sección 'Anomaly Detection Engine' para la metodología." />
+        <EndpointRow method="GET" path="/api/crypto/anomalies" auth={false} desc="Anomalías detectadas a través de múltiples coins." />
+        <EndpointRow method="GET" path="/api/crypto/scores" auth={false} desc="Scoring cuantitativo comparativo entre coins." />
+        <EndpointRow method="GET" path="/api/crypto/overview" auth={false} desc="Resumen ejecutivo del estado del mercado (composición de KCS, regime, top movers)." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/risk" auth={false} desc="Métricas de riesgo (VaR, volatilidad, drawdown) para una coin. Ver sección 'Risk Engine — VaR & Metrics'." />
+        <EndpointRow method="GET" path="/api/crypto/correlation" auth={false} desc="Matriz de correlación de retornos entre las coins solicitadas." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/forecast" auth={false} desc="Forecast por ensemble de modelos para una coin. Ver sección 'Forecast — Model Ensemble'." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/montecarlo" auth={false} desc="Simulación Monte Carlo (GBM) de trayectorias de precio futuras. Ver sección 'Monte Carlo — Geometric Brownian Motion'." />
+        <EndpointRow method="GET" path="/api/crypto/regime" auth={false} desc="Régimen de mercado agregado actual (trending / mean-reverting / high-vol). Ver sección 'Market Regime Engine'." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/regime" auth={false} desc="Régimen de mercado específico de una coin." />
+        <EndpointRow method="GET" path="/api/crypto/kcs" auth={false} desc="Kukora Composite Signal agregado. Ver sección 'KCS — Kukora Composite Signal'." />
+        <EndpointRow method="GET" path="/api/crypto/coin/:id/backtest" auth={false} desc="Backtest del motor de estrategias sobre el histórico de una coin. Ver sección 'Backtest Engine — Strategys'." />
+      </ApiSection>
+
+      <ApiSection title="Alertas  ·  /api/alerts" color="#f59e0b">
+        <EndpointRow method="GET"    path="/api/alerts" desc="Lista las alertas del usuario, más recientes primero." />
+        <EndpointRow method="POST"   path="/api/alerts" desc="Crea una nueva alerta (ej. precio objetivo para una coin)." />
+        <EndpointRow method="PATCH"  path="/api/alerts/:id" desc="Actualiza una alerta propia." />
+        <EndpointRow method="DELETE" path="/api/alerts/:id" desc="Elimina una alerta propia (ownership verificado en el repositorio)." />
+      </ApiSection>
+
+      <ApiSection title="Watchlist  ·  /api/watchlist" color="#f59e0b">
+        <EndpointRow method="GET"  path="/api/watchlist" desc="Watchlist de coins del usuario." />
+        <EndpointRow method="POST" path="/api/watchlist" desc="Crea o reemplaza la watchlist completa del usuario."
+          params={[['coins','string[]',true,'Lista de IDs de coin']]} />
+      </ApiSection>
+
+      <ApiSection title="Portfolio  ·  /api/portfolio" color="#f59e0b">
+        <EndpointRow method="GET"    path="/api/portfolio" desc="Lista paginada de posiciones del usuario."
+          params={[['limit','number',false,'Default 50, max 200'],['offset','number',false,'Default 0']]} />
+        <EndpointRow method="POST"   path="/api/portfolio" desc="Crea una nueva posición. Soporta idempotencia vía header Idempotency-Key (ventana de 60s) para evitar duplicados en reintentos del cliente." />
+        <EndpointRow method="DELETE" path="/api/portfolio/:id" desc="Elimina una posición propia." />
+      </ApiSection>
+
+      <ApiSection title="Dataset  ·  /api/dataset" color="#f59e0b">
+        <EndpointRow method="POST" path="/api/dataset/analyze" auth={false} desc="Parsea y analiza un dataset (CSV o JSON) subido por el usuario. Límite de 10,000 filas."
+          params={[['csv','string',false,'CSV crudo, mutuamente exclusivo con json'],['json','array',false,'Array de filas, mutuamente exclusivo con csv']]} />
+        <EndpointRow method="GET" path="/api/dataset/example" auth={false} desc="Devuelve un CSV sintético de 90 días de precio BTC para probar la UI de análisis de datasets." />
+      </ApiSection>
+
+      <ApiSection title="Multi-Tenant Bot  ·  /api/tenant-bot" color="#8b5cf6">
+        <EndpointRow method="GET"    path="/api/tenant-bot/status" desc="Estado del bot de paper-trading propio del usuario: on/off, wallet, P&L, historial y estado del risk guard." />
+        <EndpointRow method="POST"   path="/api/tenant-bot/toggle" desc="Enciende o apaga el bot del usuario."
+          params={[['enabled','boolean',true,'']]} />
+        <EndpointRow method="GET"    path="/api/tenant-bot/config" desc="Overrides de configuración propios del usuario sobre el engine." />
+        <EndpointRow method="POST"   path="/api/tenant-bot/config" desc="Aplica overrides de configuración (parcial). Siempre responde 200; `ok` refleja si todas las keys se aplicaron."
+          params={[['patch','object',true,'Mapa key/value de overrides']]} />
+        <EndpointRow method="DELETE" path="/api/tenant-bot/config/:key" desc="Limpia un override puntual." />
+        <EndpointRow method="POST"   path="/api/tenant-bot/config/reset" desc="Limpia todos los overrides del usuario." />
+        <EndpointRow method="POST"   path="/api/tenant-bot/risk/reset" desc="Resetea el circuit breaker de riesgo del usuario si estaba disparado." />
+      </ApiSection>
+
+      <ApiSection title="Tenant Demo (jurado)  ·  /api/tenant-demo" color="#8b5cf6">
+        <EndpointRow method="POST" path="/api/tenant-demo/start" desc="Activa dos tenants demo con perfiles opuestos (conservative: minScore 80 / 0.005 BTC; aggressive: minScore 40 / 0.02 BTC) recogidos automáticamente por el loop de ejecución real." />
+        <EndpointRow method="GET"  path="/api/tenant-demo/status" desc="Snapshot lado a lado de ambos tenants demo (wallets, P&L, historial, config, riesgo)." />
+        <EndpointRow method="POST" path="/api/tenant-demo/stop" desc="Apaga ambos bots demo. Wallets e historial se conservan." />
+        <EndpointRow method="POST" path="/api/tenant-demo/reset" desc="Apaga y borra por completo wallets/historial/config/riesgo de ambos tenants demo." />
+      </ApiSection>
+
+      <ApiSection title="Feature Flags (admin/operador)  ·  /api/feature-flags" color="#6366f1">
+        <EndpointRow method="GET"    path="/api/feature-flags" desc="Lista todos los flags con su valor global actual." />
+        <EndpointRow method="GET"    path="/api/feature-flags/history" desc="Historial de auditoría de cambios de flags."
+          params={[['limit','number',false,'Default 100, max 500']]} />
+        <EndpointRow method="GET"    path="/api/feature-flags/:key" desc="Definición de un flag + valor resuelto para un tenant."
+          params={[['tenantId','string',false,'Si se omite, devuelve el valor global']]} />
+        <EndpointRow method="POST"   path="/api/feature-flags/:key" desc="Fija el valor global de un flag. Los flags marcados 'kill-switch' requieren el permiso admin FLAGS_KILL_SWITCH; el resto solo FLAGS_WRITE."
+          params={[['value','any',true,'']]} />
+        <EndpointRow method="POST"   path="/api/feature-flags/:key/tenant/:tenantId" desc="Fija un override del flag para un tenant específico." />
+        <EndpointRow method="DELETE" path="/api/feature-flags/:key/tenant/:tenantId" desc="Limpia el override de un tenant, volviendo al valor global." />
+      </ApiSection>
+
+      <ApiSection title="Ops Dashboard (admin/SRE)  ·  /api/ops" color="#6366f1">
+        <EndpointRow method="GET"  path="/api/ops" desc="Snapshot operacional agregado: salud de jobs, kill-switches activos, tracing, observability y eventos recientes de trading. Gateado además por el feature flag operationalDashboard." />
+        <EndpointRow method="GET"  path="/api/ops/jobs" desc="Estado de los background jobs (payload liviano para polling)." />
+        <EndpointRow method="POST" path="/api/ops/jobs/:name/run" desc="Dispara manualmente un job ('run now')." />
+        <EndpointRow method="GET"  path="/api/ops/trades/:tradeId/replay" desc="Timeline completo de eventos + estado proyectado para un trade puntual." />
+        <EndpointRow method="GET"  path="/api/ops/judge-report" desc="Reporte HTML autocontenido (arquitectura, backtest institucional, validación estadística, stress test y snapshot multi-tenant) pensado para evaluación de un jurado en un solo clic."
+          params={[['capital','number',false,'Capital base para las métricas institucionales. Default 100000']]} />
+      </ApiSection>
+
+      <ApiSection title="Exchange Credentials & Live Mode  ·  /api/user/exchange-credentials + /api/user/live-mode" color="#f03e3e">
+        <EndpointRow method="GET"    path="/api/user/exchange-credentials" desc="Lista los exchanges conectados por el usuario (solo nombre + fecha de conexión, nunca las keys)." />
+        <EndpointRow method="POST"   path="/api/user/exchange-credentials" desc="Conecta o rota una key de exchange propia. Antes de guardar: 1) prueba la key contra el exchange real, 2) rechaza keys con permiso de retiro habilitado (o advierte si el exchange no permite verificarlo programáticamente)."
+          params={[['exchange','string',true,''],['apiKey','string',true,''],['apiSecret','string',true,''],['apiPassphrase','string',false,'Requerido por algunos exchanges']]} />
+        <EndpointRow method="DELETE" path="/api/user/exchange-credentials/:exchange" desc="Desconecta (borra) las credenciales guardadas de un exchange." />
+        <EndpointRow method="GET"    path="/api/user/live-mode" desc="Estado actual del modo live personal del usuario + texto del disclaimer de riesgo a mostrar." />
+        <EndpointRow method="POST"   path="/api/user/live-mode" desc="Activa el modo live personal. Requiere un exchange conectado, un token 2FA válido y disclaimerAccepted:true. Una operación solo se ejecuta en vivo si este switch Y el switch global lo permiten."
+          params={[['twoFactorToken','string',true,''],['disclaimerAccepted','boolean',true,'Debe ser true']]} />
+        <EndpointRow method="POST"   path="/api/user/live-mode/disable" desc="Desactiva el modo live personal. Siempre permitido, sin requerir 2FA (apagar nunca es la acción riesgosa)." />
       </ApiSection>
     </>
   );
@@ -243,7 +366,7 @@ const DOCS = [
         {[
           { nivel: '1', label: 'Spread too narrow', formula: 'spreadPct < breakEvenPct', desc: 'Gross spread does not cover the fee + estimated slippage break-even. Execution would guarantee a net loss.' },
           { nivel: '2', label: 'Spread demasiado grande',  formula: 'spreadPct > MAX_SPREAD_PCT (4%)', desc: 'Un spread anormalmente grande (>4%) es signal de dato corrupto, feed con lag severo, o price fantasma. No es una opportunity real.' },
-          { nivel: '3', label: 'Liquidity insuficiente',    formula: 'fillProbability < 0.50', desc: 'El order book no tiene suficiente profundidad para el tamyear de trade solicitado (default: 0.05 BTC). La probabilidad de fill completo es menor al 50%.' },
+          { nivel: '3', label: 'Liquidity insuficiente',    formula: 'fillProbability < 0.50', desc: 'El order book no tiene suficiente profundidad para el tamaño de trade solicitado (default: 0.05 BTC). La probabilidad de fill completo es menor al 50%.' },
           { nivel: '4', label: 'Stale feed',               formula: 'feedAgeMs > STALE_FEED_MS (5000ms)', desc: 'Most recent price is over 5 seconds old without update. In 5 seconds BTC can move 0.1%+ — the opportunity may no longer exist.' },
           { nivel: '5', label: 'Daily loss stop',          formula: 'dailyPnl < MAX_DAILY_LOSS (−$500)', desc: 'Cumulative session losses exceed the limit. Engine pauses automatically until next session reset.' },
         ].map(cb => (
@@ -609,7 +732,7 @@ const DOCS = [
           </p>
           {[
             ['minScore',            '0–100 pts',    'Puntuación mínima para execute un trade. Upload = filter trades marginales.'],
-            ['tradeAmountBTC',      '0.001–0.5 BTC','Tamyear de position por trade. Afecta gross profit, fees y slippage.'],
+            ['tradeAmountBTC',      '0.001–0.5 BTC','Tamaño de position por trade. Afecta gross profit, fees y slippage.'],
             ['feeMode',             'taker|maker',  'Maker fees (0.01% Bybit) reducen el break-even ~60% vs taker (0.1%).'],
             ['minSpreadPct',        '0.0001–5%',    'Circuit breaker inferior: spreads menores a este valor se ignoran.'],
             ['maxSpreadPct',        '1–20%',        'Circuit breaker superior: spreads mayores indican feed obsoleto o error.'],
@@ -662,7 +785,7 @@ const DOCS = [
           {[
             ['mid_flight_failure',  'Compra ejecutada, venta timeout 3000ms. System detecta position descubierta, calcula risk de market (P&L si el price cae 1%/3%), evalúa 3 opciones de salida y decide según threshold de loss.'],
             ['liquidity_crunch',    'Libro L2 pierde 60% de profundidad durante el fill. VWAP walk recalcula partial fill (fillable < requested). System evalúa si el P&L degradado sigue superando minNetProfitUSD.'],
-            ['extreme_slippage',    'BTC sube 1.2% durante el fill. Compara slippage estimado (0.05%) vs real (1.2%). Evalúa si el circuit breaker de maxSpreadPct habría cancelado el trade. Muestra qué parameters de liveConfig habrían mitigado el dyear.'],
+            ['extreme_slippage',    'BTC sube 1.2% durante el fill. Compara slippage estimado (0.05%) vs real (1.2%). Evalúa si el circuit breaker de maxSpreadPct habría cancelado el trade. Muestra qué parameters de liveConfig habrían mitigado el daño.'],
           ].map(([id, desc]) => (
             <div key={id} style={{ display:'flex', gap:10, padding:'7px 0', borderBottom:'1px solid var(--border)', alignItems:'flex-start' }}>
               <code style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--color-red)', flexShrink:0, width:180 }}>{id}</code>
@@ -683,13 +806,12 @@ const DOCS = [
 ];
 
 export default function DocsPage() {
-  const { t } = useTranslation();
   const [active, setActive] = useState('gbm');
 
   return (
     <div className="page-enter">
       <PageHeader
-        title={t('nav.docs')}
+        title="Documentación Técnica"
         description="Models matemáticos, fórmulas y fundamentos cuantitativos detrás de Kukora"
         help="Esta documentación demuestra el rigor matemático del system. Cada model tiene sus fórmulas, limitaciones y contexto."
       />

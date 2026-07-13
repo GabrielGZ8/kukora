@@ -303,7 +303,7 @@ export default function IntelligencePanel({ data, opportunities = [] }) {
                   { label: 'Buy Fill',      val: `${topViable.buyFillPct ?? '—'}%` },
                   { label: 'Sell Fill',     val: `${topViable.sellFillPct ?? '—'}%` },
                   { label: 'Feed',          val: topViable.buySource === 'ws' && topViable.sellSource === 'ws' ? 'WS ×2' : 'Mixed' },
-                  ...(topViable.recommendedSize != null ? [{ label: 'Tamyear Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
+                  ...(topViable.recommendedSize != null ? [{ label: 'Tamaño Rec.', val: `${topViable.recommendedSize} BTC` }] : []),
                 ].map(({ label, val }) => (
                   <div key={label} style={{ display: 'flex', gap: 8 }}>
                     <span style={{ fontSize: 10, color: 'var(--text-dim)', width: 80 }}>{label}:</span>

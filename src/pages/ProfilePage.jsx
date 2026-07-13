@@ -143,9 +143,13 @@ export default function ProfilePage() {
   const [pwLoading, setPwLoading] = useState(false);
 
   // Fetch profile from /api/auth/me on mount
+  // Note: api.profile.get() resolves to { user: {...} } (the server wraps
+  // the record in a `user` key) — it must be unwrapped here, otherwise
+  // every field (name, createdAt, lastLoginAt...) reads as undefined and
+  // falls back to placeholders even though the data loaded successfully.
   useEffect(() => {
     api.profile.get()
-      .then(d => { setProfileData(d); setEditName(d?.name || ''); })
+      .then(d => { setProfileData(d?.user || null); setEditName(d?.user?.name || ''); })
       .catch(() => { setProfileData(null); })
       .finally(() => setProfileLoading(false));
   }, []);
@@ -161,8 +165,8 @@ export default function ProfilePage() {
     if (!editName.trim()) return;
     setSavingName(true);
     try {
-      await api.profile.update({ name: editName.trim() });
-      setProfileData(prev => ({ ...prev, name: editName.trim() }));
+      const res = await api.profile.update({ name: editName.trim() });
+      setProfileData(prev => ({ ...prev, ...(res?.user || { name: editName.trim() }) }));
       setNameEditing(false);
       toast.success('Nombre actualizado');
     } catch (e) {

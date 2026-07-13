@@ -4,7 +4,7 @@
  * paper/live mode, watchdog, reconciliation.
  */
 import { useState, useEffect } from 'react';
-import { requestArbitrage } from '../../api';
+import { requestArbitrage, getAccessToken } from '../../api';
 
 const fmtUSD = n => n == null ? '—' : `${n >= 0 ? '+' : ''}$${Math.abs(n).toFixed(2)}`;
 
@@ -22,6 +22,31 @@ function Pill({ color, bg, border, children, pulse }) {
   );
 }
 
+// Plain <a href="/api/.../report/html"> navigations never carry the
+// Authorization header (the token lives in memory/localStorage, not a
+// cookie), so a direct link to an authenticated endpoint always came back
+// as { ok:false, error:"Authentication required", code:"NO_TOKEN" }.
+// Fetching with the token attached and opening the result as a blob fixes it.
+async function openAuthedReport(setDownloading) {
+  setDownloading(true);
+  try {
+    const token = getAccessToken();
+    const res = await fetch('/api/arbitrage/report/html', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) {
+    console.error('No se pudo generar el reporte:', e);
+    alert('No se pudo generar el reporte. Intenta de nuevo.');
+  } finally {
+    setDownloading(false);
+  }
+}
+
 function Dot({ color, pulse }) {
   return (
     <span style={{
@@ -35,6 +60,7 @@ function Dot({ color, pulse }) {
 export default function SystemStatusBar({ data }) {
   const [alertHistory, setAlertHistory] = useState([]);
   const [tradingMode, setTradingMode]   = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   useEffect(() => {
     // Use requestArbitrage so the Authorization header is injected automatically.
@@ -147,15 +173,20 @@ export default function SystemStatusBar({ data }) {
         )}
 
         {/* Download report */}
-        <a href="/api/arbitrage/report/html" target="_blank" rel="noreferrer" style={{
-          marginLeft: 'auto', fontSize: 10, fontWeight: 700,
-          color: 'var(--text-dim)', background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)', borderRadius: 6,
-          padding: '4px 10px', textDecoration: 'none',
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-        }}>
-          ↓ Report
-        </a>
+        <button
+          onClick={() => openAuthedReport(setReportLoading)}
+          disabled={reportLoading}
+          style={{
+            marginLeft: 'auto', fontSize: 10, fontWeight: 700,
+            color: 'var(--text-dim)', background: 'var(--bg-elevated)',
+            border: '1px solid var(--border)', borderRadius: 6,
+            padding: '4px 10px',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            cursor: reportLoading ? 'wait' : 'pointer', opacity: reportLoading ? 0.6 : 1,
+          }}
+        >
+          {reportLoading ? '… Generando' : '↓ Reporte'}
+        </button>
       </div>
 
       {/* Critical alert ribbon */}

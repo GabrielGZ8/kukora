@@ -15,7 +15,7 @@ const SEVERITY_COLOR = {
 function timeAgo(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'now';
+  if (mins < 1) return 'ahora';
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
@@ -25,7 +25,9 @@ function timeAgo(iso) {
 export default function NotificationBell() {
   const { notifications, unread, markRead, markAllRead } = useNotifications();
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, right: 0 });
   const ref = useRef(null);
+  const btnRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -36,11 +38,25 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [open]);
 
+  // The header this bell lives in has `overflow: hidden` (needed to clip the
+  // birds animation), which was silently clipping this dropdown too — the
+  // click worked and `open` toggled fine, but the panel rendered invisible.
+  // Using `position: fixed`, anchored to the button's own bounding rect,
+  // takes the dropdown out of the header's clipped stacking context entirely.
+  function handleToggle() {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setCoords({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+    setOpen(o => !o);
+  }
+
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
-        onClick={() => setOpen(o => !o)}
-        title="Notifications"
+        ref={btnRef}
+        onClick={handleToggle}
+        title="Notificaciones"
         style={{
           position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 28, height: 28, borderRadius: 8,
@@ -71,7 +87,7 @@ export default function NotificationBell() {
 
       {open && (
         <div style={{
-          position: 'absolute', top: 36, right: 0, zIndex: 200,
+          position: 'fixed', top: coords.top, right: coords.right, zIndex: 2000,
           width: 320, maxHeight: 400, overflowY: 'auto',
           background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12,
           boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
@@ -81,21 +97,21 @@ export default function NotificationBell() {
             padding: '12px 14px', borderBottom: '1px solid var(--border)',
           }}>
             <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Notifications
+              Notificaciones
             </span>
             {unread > 0 && (
               <button
                 onClick={markAllRead}
                 style={{ background: 'none', border: 'none', color: 'var(--color-primary, #FF2D78)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
               >
-                Mark all read
+                Marcar todas leídas
               </button>
             )}
           </div>
 
           {notifications.length === 0 ? (
             <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-              No notifications yet.
+              Aún no hay notificaciones.
             </div>
           ) : (
             <div>
@@ -119,7 +135,7 @@ export default function NotificationBell() {
                       {n.title}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                      {timeAgo(n.createdAt)} ago
+                      hace {timeAgo(n.createdAt)}
                     </div>
                   </span>
                 </button>

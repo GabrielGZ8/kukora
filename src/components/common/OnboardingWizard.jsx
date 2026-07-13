@@ -73,7 +73,7 @@ export default function OnboardingWizard({ onComplete }) {
     setError('');
 
     if (step === 0) {
-      if (!name.trim()) { setError('Please enter a display name.'); return; }
+      if (!name.trim()) { setError('Por favor ingresa un nombre para mostrar.'); return; }
       setStep(1);
       return;
     }
@@ -84,7 +84,7 @@ export default function OnboardingWizard({ onComplete }) {
         await setPairs({ pairs: selectedPairs });
         setStep(2);
       } catch (e) {
-        setError(e.message || 'Could not save trading pairs. You can change this later in Settings.');
+        setError(e.message || 'No se pudieron guardar los pares de trading. Puedes cambiarlo después en Configuración.');
         setStep(2); // non-blocking — pair selection isn't critical enough to trap the user
       } finally {
         setSaving(false);
@@ -99,7 +99,7 @@ export default function OnboardingWizard({ onComplete }) {
       updateUser({ name: name.trim(), onboardingDone: true });
       onComplete?.();
     } catch (e) {
-      setError(e.message || 'Could not finish setup. Please try again.');
+      setError(e.message || 'No se pudo finalizar la configuración. Intenta de nuevo.');
     } finally {
       setSaving(false);
     }
@@ -126,25 +126,25 @@ export default function OnboardingWizard({ onComplete }) {
 
         <div style={{ padding: '26px 28px 0', textAlign: 'center', flexShrink: 0 }}>
           <div style={{ fontSize: 28, fontWeight: 900, color: GREEN, letterSpacing: '-1px', marginBottom: 4 }}>kukora</div>
-          <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 18 }}>Let&apos;s set up your account</div>
+          <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 18 }}>Configuremos tu cuenta</div>
         </div>
 
         <div style={{ padding: '0 28px 18px', flex: 1, overflowY: 'auto' }}>
 
           {step === 0 && (
             <div>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>How should we call you?</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>¿Cómo te llamamos?</h3>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.5 }}>
-                This name appears in the topbar and on your profile.
+                Este nombre aparece en la barra superior y en tu perfil.
               </p>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                Display name
+                Nombre a mostrar
               </label>
               <input
                 autoFocus
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="Your name"
+                placeholder="Tu nombre"
                 maxLength={80}
                 style={{
                   width: '100%', padding: '11px 14px', borderRadius: 8, fontSize: 14,
@@ -154,12 +154,12 @@ export default function OnboardingWizard({ onComplete }) {
                 }}
               />
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                Theme
+                Tema
               </label>
               <div style={{ display: 'flex', gap: 10 }}>
                 {[
-                  { id: 'light', label: '☀️ Light' },
-                  { id: 'dark',  label: '🌙 Dark' },
+                  { id: 'light', label: '☀️ Claro' },
+                  { id: 'dark',  label: '🌙 Oscuro' },
                 ].map(t => (
                   <button
                     key={t.id}
@@ -181,9 +181,9 @@ export default function OnboardingWizard({ onComplete }) {
 
           {step === 1 && (
             <div>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>Which pairs do you want to trade?</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>¿Qué pares quieres operar?</h3>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.5 }}>
-                The engine only scans pairs you activate here. You can change this anytime in Settings.
+                El motor solo escanea los pares que actives aquí. Puedes cambiar esto cuando quieras en Configuración.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {(supported.length ? supported : ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']).map(pair => {
@@ -229,20 +229,20 @@ export default function OnboardingWizard({ onComplete }) {
 
           {step === 2 && (
             <div>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>You&apos;re starting in Paper Trading</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>Estás comenzando en modo Paper Trading</h3>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                Every new account begins in paper mode — safe by default.
+                Toda cuenta nueva empieza en modo paper — seguro por defecto.
               </p>
               <div style={{ background: 'rgba(0,184,122,0.06)', border: '1px solid rgba(0,184,122,0.2)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: GREEN, fontWeight: 800, marginBottom: 4 }}>📝 Paper Trading (active now)</div>
+                <div style={{ fontSize: 12, color: GREEN, fontWeight: 800, marginBottom: 4 }}>📝 Paper Trading (activo ahora)</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                  Real market prices, simulated execution. The engine detects real arbitrage opportunities and tracks what it would have earned — with zero real funds at risk.
+                  Precios reales de mercado, ejecución simulada. El motor detecta oportunidades reales de arbitraje y registra lo que habría ganado — con cero fondos reales en riesgo.
                 </div>
               </div>
               <div style={{ background: `${AMBER}0f`, border: `1px solid ${AMBER}30`, borderRadius: 10, padding: '14px 16px' }}>
-                <div style={{ fontSize: 12, color: AMBER, fontWeight: 800, marginBottom: 4 }}>⚡ Live Trading (opt-in later)</div>
+                <div style={{ fontSize: 12, color: AMBER, fontWeight: 800, marginBottom: 4 }}>⚡ Live Trading (opcional, más adelante)</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                  Executes real trades with real funds across connected exchanges. Requires valid API keys and explicit confirmation in Settings — never enabled automatically.
+                  Ejecuta operaciones reales con fondos reales en los exchanges conectados. Requiere API keys válidas y confirmación explícita en Configuración — nunca se activa automáticamente.
                 </div>
               </div>
             </div>
@@ -268,7 +268,7 @@ export default function OnboardingWizard({ onComplete }) {
                 color: 'var(--text-muted)', borderRadius: 10, padding: '11px 20px',
                 fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer',
               }}>
-                ← Back
+                ← Atrás
               </button>
             )}
             <button onClick={goNext} disabled={saving} style={{
@@ -278,7 +278,7 @@ export default function OnboardingWizard({ onComplete }) {
               opacity: saving ? 0.7 : 1,
               boxShadow: `0 4px 14px ${PINK}33`,
             }}>
-              {saving ? 'Saving…' : step === 2 ? 'Start using Kukora →' : 'Continue →'}
+              {saving ? 'Guardando…' : step === 2 ? 'Empezar a usar Kukora →' : 'Continuar →'}
             </button>
           </div>
         </div>

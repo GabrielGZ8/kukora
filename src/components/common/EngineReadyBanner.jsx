@@ -35,8 +35,13 @@ export default function EngineReadyBanner({ wsStatusMap, feedFreshness, data, on
   if (allReady) return (
     <div className="status-banner" style={{ background:'rgba(0,184,122,0.08)', border:'1px solid rgba(0,184,122,0.25)' }}>
       <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--color-green)', animation:'pulseDot 1.5s infinite', flexShrink:0 }}/>
-      <span style={{ fontWeight:800, color:'var(--color-green)' }}>SYSTEM READY</span>
-      <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges live · All feeds fresh · Engine active</span>
+      <span style={{ fontWeight:800, color:'var(--color-green)', whiteSpace:'nowrap' }}>SISTEMA LISTO</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges en vivo</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>Todos los feeds actualizados</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>Motor activo</span>
       {feeBadge}
       {configBadge}
     </div>
@@ -45,8 +50,11 @@ export default function EngineReadyBanner({ wsStatusMap, feedFreshness, data, on
   if (partialReady) return (
     <div className="status-banner" style={{ background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.25)' }}>
       <span style={{ width:8, height:8, borderRadius:'50%', background:'#F59E0B', animation:'pulseDot 1.5s infinite', flexShrink:0 }}/>
-      <span style={{ fontWeight:800, color:'#F59E0B' }}>WARMING UP</span>
-      <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges connected · Waiting for fresh feeds…</span>
+      <span style={{ fontWeight:800, color:'#F59E0B', whiteSpace:'nowrap' }}>CALENTANDO MOTORES</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>{liveExchanges}/{totalExchanges} exchanges conectados</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>Esperando feeds actualizados…</span>
       {feeBadge}
       {configBadge}
     </div>
@@ -55,8 +63,9 @@ export default function EngineReadyBanner({ wsStatusMap, feedFreshness, data, on
   return (
     <div className="status-banner" style={{ background:'rgba(255,45,120,0.07)', border:'1px solid rgba(255,45,120,0.20)' }}>
       <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--color-red)', flexShrink:0 }}/>
-      <span style={{ fontWeight:800, color:'var(--color-red)' }}>CONNECTING</span>
-      <span style={{ color:'var(--text-dim)' }}>Establishing WebSocket connections to exchanges…</span>
+      <span style={{ fontWeight:800, color:'var(--color-red)', whiteSpace:'nowrap' }}>CONECTANDO</span>
+      <span className="status-banner-sep">·</span>
+      <span style={{ color:'var(--text-dim)' }}>Estableciendo conexiones WebSocket con los exchanges…</span>
     </div>
   );
 }

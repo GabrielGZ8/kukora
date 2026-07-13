@@ -272,7 +272,7 @@ export default function Layout() {
             background: 'var(--bg-surface-2)', borderRadius: 8, marginBottom: 6,
           }}>
             <div className="pulse-dot" />
-            <span style={{ fontWeight: 600, flex: 1, whiteSpace: 'nowrap' }}>Live · {time}</span>
+            <span style={{ fontWeight: 600, flex: 1, whiteSpace: 'nowrap' }}>En vivo · {time}</span>
           </div>
           <button
             onClick={onboarding.open}
@@ -287,7 +287,7 @@ export default function Layout() {
             onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-dim)'; }}
           >
             <span style={{ fontSize: 12 }}>?</span>
-            <span>User Guide</span>
+            <span>Guía del Usuario</span>
             <kbd style={{
               marginLeft: 'auto', fontSize: 9, fontWeight: 700,
               background: 'var(--bg-surface-3)', border: '1px solid var(--border)',
@@ -317,7 +317,7 @@ export default function Layout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, position: 'relative', zIndex: 1 }}>
             <button
               onClick={() => setOpen(o => !o)}
-              title="Collapse sidebar"
+              title="Colapsar menú"
               style={{
                 background: 'none', border: 'none',
                 color: 'var(--text-muted)', fontSize: 17,
@@ -392,7 +392,7 @@ export default function Layout() {
 
             <button
               onClick={toggleTheme}
-              title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+              title={`Cambiar a modo ${theme === 'light' ? 'oscuro' : 'claro'}`}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 28, height: 28, borderRadius: 8,
@@ -419,7 +419,7 @@ export default function Layout() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, minWidth: 0 }}>
                   <button
                     onClick={() => navigate('/profile')}
-                    title="View profile"
+                    title="Ver perfil"
                     style={{
                       width: 28, height: 28, borderRadius: 8,
                       background: 'linear-gradient(135deg, var(--color-primary, #FF2D78), #5741D9)',
@@ -434,14 +434,14 @@ export default function Layout() {
                   </button>
                   <span
                     onClick={() => navigate('/profile')}
-                    title="View profile"
+                    title="Ver perfil"
                     style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', flexShrink: 1 }}
                   >
                     {user?.name || user?.email?.split('@')[0] || 'User'}
                   </span>
                   <button
                     onClick={() => navigate('/settings')}
-                    title="Settings"
+                    title="Configuración"
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       width: 24, height: 24, borderRadius: 6, flexShrink: 0,
@@ -457,7 +457,7 @@ export default function Layout() {
                   </button>
                   <button
                     onClick={logout}
-                    title="Sign out"
+                    title="Cerrar sesión"
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       width: 24, height: 24, borderRadius: 6, flexShrink: 0,
